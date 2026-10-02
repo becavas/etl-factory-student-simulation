@@ -1,16 +1,23 @@
 bundle:
-  name: enterprise_fabric_native_lab
+  name: enterprise_fabric_engineering_baseline
   databricks_cli_version: "1.12.*"
 
 include:
   - resources/*.yml
 
+artifacts:
+  default:
+    type: whl
+    build: python -m build --wheel
+    path: .
+
 variables:
-  sandbox_cluster_id:
-    description: ID del cluster de aprendizaje aprobado para sandbox.
-  greeting:
-    description: Mensaje configurado durante el despliegue del laboratorio.
-    default: Hola desde un Asset Bundle nativo
+  policy_id:
+    description: ID de la compute policy aprobada para sandbox.
+  spark_version:
+    description: Databricks Runtime LTS permitido por la policy.
+  node_type_id:
+    description: Node type pequeño permitido por la policy.
 
 targets:
   sandbox:

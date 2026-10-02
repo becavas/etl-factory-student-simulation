@@ -107,6 +107,23 @@ else
 fi
 
 echo
+echo "== Ingeniería Python =="
+for tool in ruff pytest build; do
+  if python -m "$tool" --version >/dev/null 2>&1; then
+    tool_version=$(python -m "$tool" --version 2>&1 | head -n 1)
+    ok "$tool_version"
+  else
+    fail "$tool no está disponible; ejecuta: make env-update"
+  fi
+done
+
+if python -c 'import enterprise_fabric' >/dev/null 2>&1; then
+  ok "Paquete enterprise_fabric instalado."
+else
+  fail "Paquete no instalado; ejecuta: make install"
+fi
+
+echo
 if [ "$failed" -ne 0 ]; then
   echo "doctor.sh: hay problemas pendientes."
   exit 1

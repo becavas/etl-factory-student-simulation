@@ -1,0 +1,52 @@
+name: pull-request
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-request-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  engineering-quality:
+    name: engineering-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install project and quality tools
+        run: |
+          python -m pip install --disable-pip-version-check \
+            build==1.5.0 \
+            hatchling==1.32.0 \
+            pytest==9.1.1 \
+            ruff==0.16.3
+          python -m pip install --no-deps .
+
+      - name: Check formatting
+        run: ruff format --check .
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Run unit tests
+        run: python -m pytest
+
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Inspect wheel contract
+        run: python scripts/inspect_wheel.py dist/*.whl

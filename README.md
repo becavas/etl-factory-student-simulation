@@ -34,3 +34,19 @@ databricks bundle run -t sandbox -p sandbox native_hello_job
 ```
 
 El laboratorio utiliza un cluster existente solamente para aprendizaje. No representa el patrón de compute productivo de la fábrica.
+
+## Arquitectura y dependencias
+
+- [Arquitectura de la fábrica](docs/architecture/overview.md)
+- [Estándar de naming](docs/standards/naming.md)
+- [Dependencias de plataforma](docs/platform-dependencies.md)
+
+Verificación read-only de sandbox:
+
+```bash
+export EF_CATALOG="<catalogo_asignado>"
+export EF_POLICY_ID="<policy-id-aprobado>"
+python scripts/verify_platform_prerequisites.py
+```
+
+El script no aprovisiona infraestructura. Los recursos faltantes o prohibidos se escalan al owner indicado en `docs/platform-dependencies.md`.

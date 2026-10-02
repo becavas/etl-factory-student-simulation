@@ -1,0 +1,20 @@
+bundle:
+  name: enterprise_fabric_native_lab
+  databricks_cli_version: "1.12.*"
+
+include:
+  - resources/*.yml
+
+variables:
+  sandbox_cluster_id:
+    description: ID del cluster de aprendizaje aprobado para sandbox.
+  greeting:
+    description: Mensaje configurado durante el despliegue del laboratorio.
+    default: Hola desde un Asset Bundle nativo
+
+targets:
+  sandbox:
+    mode: development
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

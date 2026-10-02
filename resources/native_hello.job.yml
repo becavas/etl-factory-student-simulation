@@ -1,0 +1,13 @@
+resources:
+  jobs:
+    native_hello_job:
+      name: native-hello
+      description: Laboratorio desechable para aprender el ciclo de vida de un Bundle nativo.
+      tasks:
+        - task_key: print_greeting
+          existing_cluster_id: ${var.sandbox_cluster_id}
+          notebook_task:
+            notebook_path: ../src/notebooks/native_hello.py
+            base_parameters:
+              greeting: ${var.greeting}
+              bundle_target: ${bundle.target}

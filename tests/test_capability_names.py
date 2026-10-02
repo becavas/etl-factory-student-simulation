@@ -1,3 +1,4 @@
+import os
 import pytest
 
 from enterprise_fabric.capability_names import normalize_capability_name

@@ -1,0 +1,67 @@
+resources:
+  jobs:
+    pedidos_e2e_job:
+      name: retail-pedidos-e2e
+      max_concurrent_runs: 1
+      parameters:
+        - name: batch_id
+          default: training_001
+        - name: fail_after_pedidos
+          default: "false"
+      tags:
+        domain: retail
+        capability: pedidos
+        environment: ${bundle.target}
+        layer: bronze-silver
+        managed_by: bundle
+      job_clusters:
+        - job_cluster_key: pedidos_shared_job_compute
+          new_cluster:
+            policy_id: ${var.policy_id}
+            spark_version: ${var.spark_version}
+            node_type_id: ${var.node_type_id}
+            data_security_mode: SINGLE_USER
+            num_workers: 1
+            custom_tags:
+              domain: retail
+              capability: pedidos
+              environment: ${bundle.target}
+              layer: bronze-silver
+              managed_by: bundle
+              policy_profile: baseline
+              target_table: pedidos_curated
+              generated_by: bundle
+              workload: e2e
+      tasks:
+        - task_key: ingest_pedidos_bronze
+          job_cluster_key: pedidos_shared_job_compute
+          timeout_seconds: 1800
+          max_retries: 1
+          min_retry_interval_millis: 60000
+          retry_on_timeout: false
+          python_wheel_task:
+            package_name: enterprise-fabric
+            entry_point: pedidos-bronze
+            named_parameters:
+              catalog: ${var.catalog}
+              source_volume_path: ${var.source_volume_path}
+              batch_id: "{{job.parameters.batch_id}}"
+              run_id: "{{job.run_id}}"
+              fail_after_pedidos: "{{job.parameters.fail_after_pedidos}}"
+          libraries:
+            - whl: ../../../../../dist/*.whl
+        - task_key: publish_pedidos_silver
+          depends_on:
+            - task_key: ingest_pedidos_bronze
+          job_cluster_key: pedidos_shared_job_compute
+          timeout_seconds: 1800
+          max_retries: 0
+          python_wheel_task:
+            package_name: enterprise-fabric
+            entry_point: pedidos-silver
+            named_parameters:
+              catalog: ${var.catalog}
+              batch_id: "{{job.parameters.batch_id}}"
+              quality_run_id: "{{job.run_id}}"
+          libraries:
+            - whl: ../../../../../dist/*.whl

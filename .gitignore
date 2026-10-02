@@ -1,0 +1,20 @@
+# Configuración local y secretos
+.env.local
+.databricks/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Build y paquetes
+build/
+dist/
+*.egg-info/
+
+# Editores y sistema operativo
+.DS_Store
+.idea/
+.vscode/

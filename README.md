@@ -20,20 +20,34 @@ make doctor
 
 Los Bundles y las capabilities se incorporan progresivamente durante el recorrido hands-on.
 
-## Bundle nativo de laboratorio
+## Calidad y empaquetado
 
-El repositorio contiene un Bundle desechable para practicar el ciclo nativo de Bundles en sandbox.
-
-Requiere un cluster de aprendizaje aprobado por Data Platform:
+Instalación local del paquete:
 
 ```bash
-export BUNDLE_VAR_sandbox_cluster_id="<cluster-id-aprobado>"
-databricks bundle validate -t sandbox -p sandbox
-databricks bundle deploy -t sandbox -p sandbox
-databricks bundle run -t sandbox -p sandbox native_hello_job
+conda activate etl-factory-databricks
+make env-update
+make install
 ```
 
-El laboratorio utiliza un cluster existente solamente para aprendizaje. No representa el patrón de compute productivo de la fábrica.
+Gate local completo:
+
+```bash
+make quality
+```
+
+El gate comprueba formato, lint, unit tests, construcción e integridad del wheel. Los Pull Requests ejecutan los mismos controles mediante `engineering-quality`.
+
+Validación remota del Bundle de sandbox:
+
+```bash
+set -a
+source .env.local
+set +a
+databricks bundle validate --target sandbox --profile sandbox
+```
+
+CI no despliega en Databricks ni utiliza credenciales del workspace. Los recursos base consumidos por el repositorio están documentados en `docs/platform-dependencies.md` dentro del repositorio hands-on.
 
 ## Arquitectura y dependencias
 

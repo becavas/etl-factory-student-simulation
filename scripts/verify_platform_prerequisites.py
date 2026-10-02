@@ -10,7 +10,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-
 PROFILE = "sandbox"
 EXPECTED_SCHEMAS = ("landing", "bronze", "silver", "gold")
 EXPECTED_VOLUMES = ("pedidos_source", "clientes_source", "productos_source")
@@ -179,13 +178,11 @@ def main() -> int:
                     results.append(failed(f"file:{entity}:training_001", exc))
                     continue
                 if filename not in batch_files:
-                    results.append(CheckResult(
-                        "MISSING", f"file:{entity}:training_001", f"falta {filename}"
-                    ))
+                    results.append(
+                        CheckResult("MISSING", f"file:{entity}:training_001", f"falta {filename}")
+                    )
                 else:
-                    results.append(CheckResult(
-                        "OK", f"file:{entity}:training_001", filename
-                    ))
+                    results.append(CheckResult("OK", f"file:{entity}:training_001", filename))
 
     if not policy_id:
         results.append(

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "enterprise-fabric"
+version = "0.1.0"
+description = "Reusable engineering foundations for the enterprise ETL factory"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = []
+
+[project.scripts]
+engineering-baseline = "enterprise_fabric.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/enterprise_fabric"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+
+[tool.ruff]
+required-version = "==0.16.3"
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

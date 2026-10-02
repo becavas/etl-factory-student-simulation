@@ -9,3 +9,4 @@ dependencies:
       - hatchling==1.32.0
       - pytest==9.1.1
       - ruff==0.16.3
+      - pyspark==3.5.2

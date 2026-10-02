@@ -1,0 +1,49 @@
+resources:
+  jobs:
+    pedidos_bronze_job:
+      name: retail-pedidos-bronze
+      max_concurrent_runs: 1
+      parameters:
+        - name: batch_id
+          default: training_001
+        - name: fail_after_pedidos
+          default: "false"
+      tags:
+        domain: retail
+        capability: pedidos
+        environment: ${bundle.target}
+        layer: bronze
+        managed_by: bundle
+      job_clusters:
+        - job_cluster_key: bronze_job_compute
+          new_cluster:
+            policy_id: ${var.policy_id}
+            spark_version: ${var.spark_version}
+            node_type_id: ${var.node_type_id}
+            data_security_mode: SINGLE_USER
+            num_workers: 1
+            custom_tags:
+              domain: retail
+              capability: pedidos
+              environment: ${bundle.target}
+              layer: bronze
+              managed_by: bundle
+              policy_profile: baseline
+              target_table: pedidos_raw
+              generated_by: bundle
+      tasks:
+        - task_key: ingest_pedidos_bronze
+          job_cluster_key: bronze_job_compute
+          timeout_seconds: 1800
+          max_retries: 0
+          python_wheel_task:
+            package_name: enterprise-fabric
+            entry_point: pedidos-bronze
+            named_parameters:
+              catalog: ${var.catalog}
+              source_volume_path: ${var.source_volume_path}
+              batch_id: "{{job.parameters.batch_id}}"
+              run_id: "{{job.run_id}}"
+              fail_after_pedidos: "{{job.parameters.fail_after_pedidos}}"
+          libraries:
+            - whl: ../../../../../dist/*.whl

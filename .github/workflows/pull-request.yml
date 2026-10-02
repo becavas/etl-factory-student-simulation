@@ -21,6 +21,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Set up Java for local PySpark tests
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -28,13 +34,16 @@ jobs:
           cache: pip
 
       - name: Install project and quality tools
+        # pyspark==3.5.2 refleja DBR 16.4 LTS y es dependencia de tests, no del wheel
         run: |
           python -m pip install --disable-pip-version-check \
             build==1.5.0 \
             hatchling==1.32.0 \
             pytest==9.1.1 \
-            ruff==0.16.3
+            ruff==0.16.3 \
+            pyspark==3.5.2
           python -m pip install --no-deps .
+
 
       - name: Check formatting
         run: ruff format --check .

@@ -12,6 +12,8 @@ dependencies = []
 
 [project.scripts]
 engineering-baseline = "enterprise_fabric.cli:main"
+pedidos-bronze = "enterprise_fabric.retail.pedidos.entrypoints:run_bronze"
+
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/enterprise_fabric"]

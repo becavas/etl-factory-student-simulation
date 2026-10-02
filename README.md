@@ -64,3 +64,7 @@ python scripts/verify_platform_prerequisites.py
 ```
 
 El script no aprovisiona infraestructura. Los recursos faltantes o prohibidos se escalan al owner indicado en `docs/platform-dependencies.md`.
+
+## Capabilities
+
+- [`retail/pedidos`](domains/retail/capabilities/pedidos/README.md): ingesta de pedidos e items desde Landing hasta Bronze.

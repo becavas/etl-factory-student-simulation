@@ -1,21 +1,31 @@
 bundle:
-  name: enterprise_fabric_engineering_baseline
+  name: retail_pedidos
   databricks_cli_version: "1.12.*"
 
 include:
   - resources/*.yml
 
+sync:
+  paths:
+    - ../../../../src
+    - .
+
 artifacts:
   default:
     type: whl
     build: python -m build --wheel
-    path: .
+    path: ../../../..
 
 variables:
+  catalog:
+    description: Catálogo del dominio retail para el ambiente.
+  source_volume_path:
+    description: Ruta del Volume gobernado de pedidos.
   policy_id:
-    description: ID de la compute policy aprobada para sandbox.
+    description: ID de la compute policy aprobada.
   spark_version:
-    description: Databricks Runtime LTS permitido por la policy.
+    description: DBR 16.4 LTS aprobado por Data Platform.
+    default: 16.4.x-scala2.12
   node_type_id:
     description: Node type pequeño permitido por la policy.
 

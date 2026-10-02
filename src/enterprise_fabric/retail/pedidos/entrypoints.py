@@ -7,6 +7,7 @@ from dataclasses import asdict
 from pyspark.sql import SparkSession
 
 from enterprise_fabric.retail.pedidos.bronze import ingest_bronze, parse_bool
+from enterprise_fabric.retail.pedidos.silver import publish_silver
 
 
 def run_bronze() -> None:
@@ -38,5 +39,25 @@ def run_bronze() -> None:
         batch_id=args.batch_id,
         run_id=args.run_id,
         fail_after_pedidos=parse_bool(args.fail_after_pedidos),
+    )
+    print(json.dumps(asdict(result), sort_keys=True))
+
+
+def run_silver() -> None:
+    """Entry point invoked by python_wheel_task for Silver."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--catalog", required=True)
+    parser.add_argument("--batch_id", required=True)
+    parser.add_argument("--quality_run_id", required=True)
+    args, _ = parser.parse_known_args()
+
+    spark = SparkSession.getActiveSession()
+    if spark is None:
+        raise RuntimeError("An active SparkSession is required")
+    result = publish_silver(
+        spark=spark,
+        catalog=args.catalog,
+        batch_id=args.batch_id,
+        quality_run_id=args.quality_run_id,
     )
     print(json.dumps(asdict(result), sort_keys=True))

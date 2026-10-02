@@ -2,7 +2,7 @@
 
 ## Propósito y ownership
 
-- Propósito: publicar pedidos e items recibidos desde `pedidos_source` en Bronze trazable.
+- Propósito: publicar pedidos e items recibidos desde `pedidos_source` en Bronze trazable y Silver conformada con calidad observable.
 - Owner de datos: `retail-data-governance`.
 - Owner técnico: `retail-data-engineering`.
 - Soporte de plataforma: consultar `docs/platform-dependencies.md`.
@@ -16,7 +16,7 @@
 
 Volume físico de sandbox: `retail_sbx_a001.landing.pedidos_source`.
 
-## Salidas
+## Salidas Bronze
 
 | Tabla | Grano Bronze | Estrategia |
 |---|---|---|
@@ -25,7 +25,18 @@ Volume físico de sandbox: `retail_sbx_a001.landing.pedidos_source`.
 
 Bronze no garantiza unicidad de claves ni validez semántica. Conserva campos fuente como string y añade metadata técnica.
 
-## Operación inicial
+## Salidas Silver
+
+| Tabla | Grano | Uso |
+|---|---|---|
+| `silver.pedidos_curated` | pedido + batch | pedidos tipados que cumplen reglas |
+| `silver.pedido_items_curated` | pedido + item + batch | items tipados que cumplen reglas |
+| `silver.pedidos_quarantine` | registro rechazado + quality run | payload y reglas violadas |
+| `silver.pedidos_quality_metrics` | regla + entidad + quality run | conteos observados por ejecución |
+
+Silver deduplica dentro de cada batch. No representa todavía el estado global vigente entre batches.
+
+## Operación inicial (Bronze únicamente)
 
 ```bash
 cd domains/retail/capabilities/pedidos
@@ -37,11 +48,24 @@ databricks bundle run pedidos_bronze_job --target sandbox --profile sandbox \
 
 Reprocesar el mismo batch reemplaza sus filas; no lo duplica. Las dos tablas se publican mediante transacciones independientes. Ante un fallo parcial, corregir la causa y repetir el mismo `batch_id`.
 
+## Ejecución E2E (Bronze + Silver)
+
+```bash
+cd domains/retail/capabilities/pedidos
+databricks bundle run pedidos_e2e_job --target sandbox --profile sandbox \
+  -- --batch_id=training_001 --fail_after_pedidos=false
+```
+
+El Job usa classic job compute compartido únicamente por sus tasks durante el run (`pedidos_shared_job_compute`).
+Una regla `FAIL` conserva métricas y quarantine, no publica curated y termina la task con error (`QualityGateError`).
+
 ## Evidencia mínima
 
 - URL y run ID del Job.
-- batch ID ejecutado.
-- conteos de ambas tablas para el batch.
+- Run ID y estado de ambas tasks (`ingest_pedidos_bronze`, `publish_pedidos_silver`).
+- Batch ID y conteos Silver (`pedidos_curated`, `pedido_items_curated`).
+- Métricas por regla en `pedidos_quality_metrics`.
+- Cantidad y rule IDs de quarantine en `pedidos_quarantine`.
 - `_record_hash` y archivos fuente observados.
-- versiones Delta producidas.
-- resultado del reproceso idempotente.
+- Versión Delta y `userMetadata` de cada salida.
+- Resultado del reproceso idempotente.

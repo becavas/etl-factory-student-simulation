@@ -3,7 +3,7 @@ bundle:
   databricks_cli_version: "1.12.*"
 
 include:
-  - resources/*.yml
+  - resources/*.generated.yml
 
 sync:
   paths:

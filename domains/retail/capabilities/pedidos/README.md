@@ -69,3 +69,18 @@ Una regla `FAIL` conserva métricas y quarantine, no publica curated y termina l
 - `_record_hash` y archivos fuente observados.
 - Versión Delta y `userMetadata` de cada salida.
 - Resultado del reproceso idempotente.
+
+## Contrato de automatización
+
+- Spec: [`specs/jobs.yml`](specs/jobs.yml).
+- Recurso desplegable: [`resources/jobs.generated.yml`](resources/jobs.generated.yml).
+- Schema y reglas: [`tools/bundle_generator`](../../../../../tools/bundle_generator).
+- Estándar: [`docs/standards/bundle-job-specs.md`](../../../../../docs/standards/bundle-job-specs.md).
+
+```bash
+python -m tools.bundle_generator generate --spec \
+  domains/retail/capabilities/pedidos/specs/jobs.yml
+python -m tools.bundle_generator generate --all --check
+```
+
+`jobs.generated.yml` se revisa y versiona, pero no se edita manualmente.

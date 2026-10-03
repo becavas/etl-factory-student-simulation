@@ -163,3 +163,105 @@ def test_measures_item_duplicate_before_deduplication(spark):
     evaluation = _evaluate(spark, [_pedido()], [_item(), newer])
     assert _metric(evaluation, "item_duplicate") == 1
     assert evaluation.items_curated.first()["cantidad"] == 3
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected_val"),
+    [
+        ("--fail_after_pedidos=true", True),
+        ("--fail_after_pedidos=false", False),
+    ],
+)
+def test_silver_parser_accepts_common_fail_after_pedidos(flag, expected_val):
+    from enterprise_fabric.retail.pedidos.entrypoints import build_silver_parser
+
+    parser = build_silver_parser()
+    args = parser.parse_args(
+        [
+            "--catalog",
+            "retail_sbx_a001",
+            "--batch_id",
+            "training_001",
+            "--quality_run_id",
+            "run_001",
+            flag,
+        ]
+    )
+    assert args.catalog == "retail_sbx_a001"
+    assert args.batch_id == "training_001"
+    assert args.quality_run_id == "run_001"
+    assert args.fail_after_pedidos is expected_val
+
+
+def test_silver_parser_default_fail_after_pedidos():
+    from enterprise_fabric.retail.pedidos.entrypoints import build_silver_parser
+
+    parser = build_silver_parser()
+    args = parser.parse_args(
+        [
+            "--catalog",
+            "retail_sbx_a001",
+            "--batch_id",
+            "training_001",
+            "--quality_run_id",
+            "run_001",
+        ]
+    )
+    assert args.fail_after_pedidos is False
+
+
+def test_silver_parser_rejects_unknown_arguments():
+    from enterprise_fabric.retail.pedidos.entrypoints import build_silver_parser
+
+    parser = build_silver_parser()
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(
+            [
+                "--catalog",
+                "retail_sbx_a001",
+                "--batch_id",
+                "training_001",
+                "--quality_run_id",
+                "run_001",
+                "--unexpected_flag",
+                "bad",
+            ]
+        )
+    assert exc_info.value.code == 2
+
+
+def test_silver_parser_rejects_invalid_boolean():
+    from enterprise_fabric.retail.pedidos.entrypoints import build_silver_parser
+
+    parser = build_silver_parser()
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(
+            [
+                "--catalog",
+                "retail_sbx_a001",
+                "--batch_id",
+                "training_001",
+                "--quality_run_id",
+                "run_001",
+                "--fail_after_pedidos=not_a_bool",
+            ]
+        )
+    assert exc_info.value.code == 2
+
+
+def test_silver_parser_rejects_abbreviated_arguments():
+    from enterprise_fabric.retail.pedidos.entrypoints import build_silver_parser
+
+    parser = build_silver_parser()
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(
+            [
+                "--cat",
+                "retail_sbx_a001",
+                "--batch_id",
+                "training_001",
+                "--quality_run_id",
+                "run_001",
+            ]
+        )
+    assert exc_info.value.code == 2

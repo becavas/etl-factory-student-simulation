@@ -43,13 +43,32 @@ def run_bronze() -> None:
     print(json.dumps(asdict(result), sort_keys=True))
 
 
-def run_silver() -> None:
-    """Entry point invoked by python_wheel_task for Silver."""
-    parser = argparse.ArgumentParser()
+def build_silver_parser() -> argparse.ArgumentParser:
+    """Build the strict argument parser for Silver task."""
+    parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--batch_id", required=True)
     parser.add_argument("--quality_run_id", required=True)
-    args, _ = parser.parse_known_args()
+    parser.add_argument(
+        "--fail_after_pedidos", type=parse_bool, default=False, help=argparse.SUPPRESS
+    )
+    return parser
+
+
+def run_silver(argv: list[str] | None = None) -> None:
+    """Entry point invoked by python_wheel_task.
+
+    Igual que `run_bronze` (§8.8, Fase 4): Databricks invoca este entry
+    point sin argumentos de Python e inyecta los `named_parameters` en
+    `sys.argv`. Se parsean explícitamente en vez de declararlos como
+    argumentos de función.
+
+    Los parámetros de nivel Job se propagan a las wheel tasks con
+    named_parameters. Se declara fail_after_pedidos como argumento común
+    conocido, sin usarlo para cambiar la publicación Silver. Los demás
+    argumentos desconocidos siguen siendo errores de configuración.
+    """
+    args = build_silver_parser().parse_args(argv)
 
     spark = SparkSession.getActiveSession()
     if spark is None:

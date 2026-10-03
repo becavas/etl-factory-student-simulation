@@ -41,7 +41,9 @@ jobs:
             hatchling==1.32.0 \
             pytest==9.1.1 \
             ruff==0.16.3 \
-            pyspark==3.5.2
+            pyspark==3.5.2 \
+            pyyaml==6.0.3 \
+            jsonschema==4.26.0
           python -m pip install --no-deps .
 
 
@@ -53,6 +55,9 @@ jobs:
 
       - name: Run unit tests
         run: python -m pytest
+
+      - name: Check generated Bundle resources
+        run: python -m tools.bundle_generator generate --all --check
 
       - name: Build wheel
         run: python -m build --wheel

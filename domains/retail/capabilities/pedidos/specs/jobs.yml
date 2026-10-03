@@ -1,0 +1,85 @@
+spec_version: 1
+kind: bundle_jobs
+
+metadata:
+  domain: retail
+  capability: pedidos
+
+package:
+  name: enterprise-fabric
+  wheel_path: ../../../../../dist/*.whl
+
+jobs:
+  - key: pedidos_bronze_job
+    name: retail-pedidos-bronze
+    layer: bronze
+    max_concurrent_runs: 1
+    parameters:
+      batch_id: training_001
+      fail_after_pedidos: "false"
+    clusters:
+      - key: bronze_job_compute
+        profile: classic_single_user_small
+        tags:
+          layer: bronze
+          policy_profile: baseline
+          target_table: pedidos_raw
+    tasks:
+      - key: ingest_pedidos_bronze
+        cluster_key: bronze_job_compute
+        timeout_seconds: 1800
+        retry:
+          max_retries: 0
+        wheel:
+          entry_point: pedidos-bronze
+          named_parameters:
+            catalog: ${var.catalog}
+            source_volume_path: ${var.source_volume_path}
+            batch_id: "{{job.parameters.batch_id}}"
+            run_id: "{{job.run_id}}"
+            fail_after_pedidos: "{{job.parameters.fail_after_pedidos}}"
+
+  - key: pedidos_e2e_job
+    name: retail-pedidos-e2e
+    layer: bronze-silver
+    max_concurrent_runs: 1
+    parameters:
+      batch_id: training_001
+      fail_after_pedidos: "false"
+    clusters:
+      - key: pedidos_shared_job_compute
+        profile: classic_single_user_small
+        tags:
+          layer: bronze-silver
+          policy_profile: baseline
+          target_table: pedidos_curated
+          workload: e2e
+    tasks:
+      - key: ingest_pedidos_bronze
+        cluster_key: pedidos_shared_job_compute
+        timeout_seconds: 1800
+        retry:
+          max_retries: 1
+          min_retry_interval_millis: 60000
+          retry_on_timeout: false
+        wheel:
+          entry_point: pedidos-bronze
+          named_parameters:
+            catalog: ${var.catalog}
+            source_volume_path: ${var.source_volume_path}
+            batch_id: "{{job.parameters.batch_id}}"
+            run_id: "{{job.run_id}}"
+            fail_after_pedidos: "{{job.parameters.fail_after_pedidos}}"
+      - key: publish_pedidos_silver
+        depends_on:
+          - ingest_pedidos_bronze
+        cluster_key: pedidos_shared_job_compute
+        timeout_seconds: 1800
+        retry:
+          max_retries: 0
+        wheel:
+          entry_point: pedidos-silver
+          named_parameters:
+            catalog: ${var.catalog}
+            batch_id: "{{job.parameters.batch_id}}"
+            quality_run_id: "{{job.run_id}}"

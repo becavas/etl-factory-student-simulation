@@ -14,6 +14,8 @@ dependencies = []
 engineering-baseline = "enterprise_fabric.cli:main"
 pedidos-bronze = "enterprise_fabric.retail.pedidos.entrypoints:run_bronze"
 pedidos-silver = "enterprise_fabric.retail.pedidos.entrypoints:run_silver"
+clientes-bronze = "enterprise_fabric.retail.clientes.entrypoints:run_bronze"
+clientes-silver = "enterprise_fabric.retail.clientes.entrypoints:run_silver"
 
 
 

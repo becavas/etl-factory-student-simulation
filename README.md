@@ -68,3 +68,4 @@ El script no aprovisiona infraestructura. Los recursos faltantes o prohibidos se
 ## Capabilities
 
 - [`retail/pedidos`](domains/retail/capabilities/pedidos/README.md): ingesta de pedidos e items desde Landing hasta Bronze.
+- [`retail/clientes`](domains/retail/capabilities/clientes/README.md): clientes desde Landing hasta Silver.

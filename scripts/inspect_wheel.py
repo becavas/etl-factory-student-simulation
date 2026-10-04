@@ -13,6 +13,8 @@ EXPECTED_ENTRY_POINTS = {
     "engineering-baseline = enterprise_fabric.cli:main",
     "pedidos-bronze = enterprise_fabric.retail.pedidos.entrypoints:run_bronze",
     "pedidos-silver = enterprise_fabric.retail.pedidos.entrypoints:run_silver",
+    "clientes-bronze = enterprise_fabric.retail.clientes.entrypoints:run_bronze",
+    "clientes-silver = enterprise_fabric.retail.clientes.entrypoints:run_silver",
 }
 EXPECTED_PACKAGE_FILES = {
     "enterprise_fabric/__init__.py",
@@ -24,6 +26,11 @@ EXPECTED_PACKAGE_FILES = {
     "enterprise_fabric/retail/pedidos/quality.py",
     "enterprise_fabric/retail/pedidos/schemas.py",
     "enterprise_fabric/retail/pedidos/silver.py",
+    "enterprise_fabric/retail/clientes/__init__.py",
+    "enterprise_fabric/retail/clientes/bronze.py",
+    "enterprise_fabric/retail/clientes/entrypoints.py",
+    "enterprise_fabric/retail/clientes/schemas.py",
+    "enterprise_fabric/retail/clientes/silver.py",
 }
 
 

@@ -10,6 +10,8 @@ resources:
         default: gold_initial_001
       - name: snapshot_mode
         default: INCREMENTAL
+      - name: aggregate_mode
+        default: INCREMENTAL
       tags:
         domain: retail
         capability: ventas
@@ -62,5 +64,20 @@ resources:
           named_parameters:
             catalog: ${var.catalog}
             batch_id: '{{job.parameters.batch_id}}'
+        libraries:
+        - whl: ../../../../../dist/*.whl
+      - task_key: publish_ventas_daily_kpi
+        depends_on:
+        - task_key: publish_ventas_fact
+        job_cluster_key: ventas_shared_job_compute
+        timeout_seconds: 1800
+        max_retries: 0
+        python_wheel_task:
+          package_name: enterprise-fabric
+          entry_point: ventas-daily-kpi
+          named_parameters:
+            catalog: ${var.catalog}
+            batch_id: '{{job.parameters.batch_id}}'
+            aggregate_mode: '{{job.parameters.aggregate_mode}}'
         libraries:
         - whl: ../../../../../dist/*.whl

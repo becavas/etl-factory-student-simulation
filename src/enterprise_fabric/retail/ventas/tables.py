@@ -65,3 +65,25 @@ def ensure_gold_tables(spark: SparkSession, catalog: str) -> None:
     )
     for statement in statements:
         spark.sql(statement)
+
+
+def ensure_aggregate_table(spark: SparkSession, catalog: str) -> None:
+    catalog = require_safe_value(catalog, "catalog")
+    table_name = f"{catalog}.gold.agg_ventas_netas_diarias"
+    spark.sql(
+        f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+          fecha_pedido DATE COMMENT 'Fecha de negocio del pedido',
+          canal STRING COMMENT 'Canal de venta publicado',
+          moneda STRING COMMENT 'Unidad monetaria; versión 1.0.0 admite PEN',
+          ventas_netas DECIMAL(28, 2) COMMENT 'Importe no cancelado',
+          lineas_incluidas BIGINT COMMENT 'Líneas no canceladas incluidas',
+          unidades_vendidas BIGINT COMMENT 'Unidades no canceladas incluidas',
+          _metric_id STRING,
+          _metric_version STRING,
+          _source_max_updated_at_utc TIMESTAMP,
+          _published_at_utc TIMESTAMP
+        ) USING DELTA
+        COMMENT 'KPI diario de ventas netas por canal y moneda'
+        """
+    )

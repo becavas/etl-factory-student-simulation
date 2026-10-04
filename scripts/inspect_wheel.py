@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 import zipfile
 from email.parser import BytesParser
@@ -19,6 +20,7 @@ EXPECTED_ENTRY_POINTS = {
     "productos-silver = enterprise_fabric.retail.productos.entrypoints:run_silver",
     "ventas-dimensions = enterprise_fabric.retail.ventas.entrypoints:run_dimensions",
     "ventas-fact = enterprise_fabric.retail.ventas.entrypoints:run_fact",
+    "ventas-daily-kpi = enterprise_fabric.retail.ventas.entrypoints:run_daily_kpi",
 }
 EXPECTED_PACKAGE_FILES = {
     "enterprise_fabric/__init__.py",
@@ -45,15 +47,21 @@ EXPECTED_PACKAGE_FILES = {
     "enterprise_fabric/retail/productos/schemas.py",
     "enterprise_fabric/retail/productos/silver.py",
     "enterprise_fabric/retail/ventas/__init__.py",
+    "enterprise_fabric/retail/ventas/aggregate.py",
     "enterprise_fabric/retail/ventas/dimensions.py",
     "enterprise_fabric/retail/ventas/entrypoints.py",
     "enterprise_fabric/retail/ventas/fact.py",
     "enterprise_fabric/retail/ventas/keys.py",
+    "enterprise_fabric/retail/ventas/semantic.py",
     "enterprise_fabric/retail/ventas/tables.py",
 }
 
 
-def inspect_wheel(wheel_path: Path) -> None:
+def inspect_wheel(
+    wheel_path: Path,
+    extra_modules: list[str] | None = None,
+    extra_entry_points: list[str] | None = None,
+) -> None:
     if wheel_path.suffix != ".whl" or not wheel_path.is_file():
         raise ValueError(f"Not a wheel file: {wheel_path}")
 
@@ -80,15 +88,41 @@ def inspect_wheel(wheel_path: Path) -> None:
     if missing_files:
         raise ValueError(f"Missing package files: {', '.join(missing_files)}")
 
+    if extra_modules:
+        for mod in extra_modules:
+            mod_path = mod.replace(".", "/") + ".py"
+            if mod_path not in names:
+                raise ValueError(f"Missing requested module: {mod} ({mod_path})")
+
+    if extra_entry_points:
+        for ep in extra_entry_points:
+            if ep not in entry_points:
+                raise ValueError(f"Missing requested entry point: {ep}")
+
     print(f"OK wheel={wheel_path.name} distribution={distribution} version={version}")
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("Usage: inspect_wheel.py <one-wheel-file>", file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(description="Inspect wheel contents and entry points")
+    parser.add_argument("wheel_path", type=Path, help="Path to wheel file")
+    parser.add_argument(
+        "--module",
+        action="append",
+        dest="modules",
+        default=[],
+        help="Specific module required in wheel (e.g. enterprise_fabric.retail.ventas.aggregate)",
+    )
+    parser.add_argument(
+        "--entry-point",
+        action="append",
+        dest="entry_points",
+        default=[],
+        help="Specific entry point required in wheel (e.g. ventas-daily-kpi)",
+    )
+    args = parser.parse_args()
+
     try:
-        inspect_wheel(Path(sys.argv[1]))
+        inspect_wheel(args.wheel_path, args.modules, args.entry_points)
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 1

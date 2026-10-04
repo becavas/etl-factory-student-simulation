@@ -1,0 +1,72 @@
+contract_version: 1
+
+metric:
+  id: ventas_netas_diarias
+  version: 1.0.0
+  name: Ventas netas diarias
+  description: >-
+    Importe de líneas de venta no canceladas, publicado diariamente
+    por canal y moneda.
+  business_owner: Retail Commercial Finance Governance Team
+  technical_owner: Data Engineering Retail Core Team
+
+  source:
+    table: gold.fact_ventas
+    measure: importe_linea
+    required_columns:
+      - fecha_pedido
+      - canal
+      - moneda
+      - importe_linea
+      - is_cancelled
+      - _last_change_batch_id
+      - _updated_at_utc
+
+  output:
+    table: gold.agg_ventas_netas_diarias
+    grain:
+      - fecha_pedido
+      - canal
+      - moneda
+
+  formula:
+    aggregation: sum
+    measure: importe_linea
+    filters:
+      is_cancelled: false
+
+  currency:
+    mode: single
+    code: PEN
+    unexpected_value: fail
+    conversion: none
+
+  reconciliation:
+    absolute_tolerance: "0.01"
+    unit: PEN
+    comparison: >-
+      Sum of published ventas_netas versus sum of eligible fact
+      importe_linea for each affected fecha_pedido and moneda.
+
+  freshness:
+    max_hours_after_fact_success: 4
+    evidence: lakeflow_job_run_timestamps
+
+  publication:
+    supported_modes:
+      - FULL
+      - INCREMENTAL
+    requires:
+      - valid_required_fields
+      - expected_currency_only
+      - unique_output_grain
+      - reconciliation_within_tolerance
+
+  compatibility:
+    additive_columns: backward_compatible_when_nullable
+    breaking_changes:
+      - rename_or_delete
+      - type_or_grain_change
+      - semantic_change
+    migration_pattern: expand_migrate_retire
+    rollback_requires: prior_code_can_read_current_schema

@@ -13,12 +13,13 @@
 
 ## 2. Propósito y Alcance
 
-La capability `retail/ventas` es responsable del modelo dimensional Gold en Unity Catalog (`retail_sbx_a001`). Consume datos curados de las capas Silver producidas independientemente por `pedidos`, `clientes` y `productos`, desacoplada de su código interno y comunicándose exclusivamente mediante tablas Delta y contratos gobernados.
+La capability `retail/ventas` es responsable del modelo dimensional Gold y de la publicación de métricas de negocio en Unity Catalog (`retail_sbx_a001`). Consume datos curados de las capas Silver producidas independientemente por `pedidos`, `clientes` y `productos`, desacoplada de su código interno y comunicándose exclusivamente mediante tablas Delta y contratos gobernados.
 
-Publica dos dimensiones Type 1 y una tabla de hechos transaccionales a nivel de línea de venta:
+Publica dos dimensiones Type 1, una tabla de hechos transaccionales y un agregado semántico gobernado:
 1. `gold.dim_cliente`: Dimensión Type 1 minimizada por `cliente_id`.
 2. `gold.dim_producto`: Dimensión Type 1 de catálogo y categorías por `producto_id`.
 3. `gold.fact_ventas`: Tabla de hechos granular por (`pedido_id`, `item_id`).
+4. `gold.agg_ventas_netas_diarias`: Métrica analítica de ventas netas diarias por canal y moneda.
 
 ---
 
@@ -37,6 +38,7 @@ Publica dos dimensiones Type 1 y una tabla de hechos transaccionales a nivel de 
 | `gold.dim_cliente` | Una fila por `cliente_id` | Type 1 `MERGE` | Desactiva solo con snapshot `FULL` | No automática |
 | `gold.dim_producto` | Una fila por `producto_id` | Type 1 `MERGE` | Desactiva solo con snapshot `FULL` | No automática |
 | `gold.fact_ventas` | Una fila por (`pedido_id`, `item_id`) | Upsert `MERGE` | Conserva líneas previas (no borra por omisión) | No automática |
+| `gold.agg_ventas_netas_diarias` | Una fila por (`fecha_pedido`, `canal`, `moneda`) | Reemplazo selectivo (`replaceWhere`) | Elimina agregado previo si la fecha se cancela | No automática |
 
 ### Modos de Snapshot
 - `INCREMENTAL`: Inserta nuevas dimensiones y actualiza atributos si cambia `_payload_hash`. Una ausencia en el lote no modifica registros existentes.
@@ -49,7 +51,28 @@ Publica dos dimensiones Type 1 y una tabla de hechos transaccionales a nivel de 
 
 ---
 
-## 5. Garantías de Calidad y Contratos Verificables
+## 5. Métricas Publicadas y Contrato Semántico
+
+La capability publica la métrica formal `ventas_netas_diarias` (versión `1.0.0`) gobernada por el contrato [`contracts/ventas-netas-diarias.yml`](contracts/ventas-netas-diarias.yml):
+
+| Atributo | Definición Contractual |
+|---|---|
+| **Métrica** | `ventas_netas_diarias` versión `1.0.0` |
+| **Significado** | Importe total de líneas de venta no canceladas. No incluye impuestos, devoluciones ni descuentos no facturados. |
+| **Fórmula** | `SUM(fact_ventas.importe_linea)` donde `is_cancelled = false` |
+| **Fuente y Salida** | `gold.fact_ventas` → `gold.agg_ventas_netas_diarias` |
+| **Grano** | Una fila por (`fecha_pedido`, `canal`, `moneda`) |
+| **Moneda** | Únicamente `PEN` (sin conversión). Si aparece otra moneda elegible, la ejecución falla de inmediato. |
+| **Tolerancia** | Absoluta de `0.01 PEN` contra el hecho de ventas |
+| **Frescura** | Publicación dentro de las 4 horas posteriores a la finalización exitosa del hecho |
+| **Owners** | Negocio: `Retail Commercial Finance Governance Team` \| Técnico: `Data Engineering Retail Core Team` |
+| **Lineage** | Metadata de commit Delta registra `batch_id`, `aggregate_mode`, `metric_id` y `metric_version` |
+| **Modos de Carga** | `FULL`: Bootstrap completo de todas las fechas vigentes \| `INCREMENTAL`: Recálculo completo de fechas afectadas |
+| **Recuperación** | Reejecución convergente mediante `replaceWhere` por fecha |
+
+---
+
+## 6. Garantías de Calidad y Contratos Verificables
 
 <!-- guarantees:start -->
 | ID | Garantía | Acción | Descripción |
@@ -66,12 +89,19 @@ Publica dos dimensiones Type 1 y una tabla de hechos transaccionales a nivel de 
 | `VEN-FA-004` | Resolución de datos tardíos | OBSERVE | Late arrival actualiza la clave foránea del hecho a la dimensión real sin duplicar la línea. |
 | `VEN-FA-005` | Preservación de cancelaciones | OBSERVE | Las cancelaciones se auditan con `is_cancelled=true`; omisiones en lotes no borran hechos. |
 | `VEN-MG-001` | Reproceso idempotente | OBSERVE | Una segunda ejecución con los mismos datos reporta 0 inserts y 0 updates en métricas Delta. |
-| `VEN-CO-001` | Compute compartido en Job | OBSERVE | Ambas tasks compatibles del Job reutilizan el mismo cluster compartido (`ventas_shared_job_compute`). |
+| `VEN-CO-001` | Compute compartido en Job | OBSERVE | Las tasks compatibles del Job reutilizan el mismo cluster compartido (`ventas_shared_job_compute`). |
+| `VEN-KPI-001` | Fórmula y filtros contract | FAIL | Fórmula y filtros coinciden exactamente con el contrato semántico versión 1.0.0. |
+| `VEN-KPI-002` | Grano único de agregado | FAIL | Máximo una fila por (`fecha_pedido`, `canal`, `moneda`) en la tabla agregada. |
+| `VEN-KPI-003` | Moneda única sin conversión | FAIL | Solo se admite PEN; presencia de otra moneda elegible aborta la publicación. |
+| `VEN-KPI-004` | Reconciliación pre-escritura | FAIL | Diferencia absoluta entre el hecho y el KPI no supera 0.01 PEN antes de persistir. |
+| `VEN-KPI-005` | Recomputación de fechas | OBSERVE | `FULL` cubre historia e `INCREMENTAL` recalcula fechas completas afectadas, limpiando cancelaciones. |
+| `VEN-KPI-006` | Cumplimiento de frescura | OBSERVE | Publicación ocurre dentro de las 4 horas posteriores al éxito del hecho. |
+| `VEN-KPI-007` | Consistencia de contrato | FAIL | Modificaciones en semántica, fórmula o grano rompen las pruebas si no se actualizan contrato y código coordinadamente. |
 <!-- guarantees:end -->
 
 ---
 
-## 6. Runbook Operativo
+## 7. Runbook Operativo
 
 ### Requisitos Previos
 - Workspace Databricks autenticado (perfil `sandbox`).
@@ -89,10 +119,18 @@ cd domains/retail/capabilities/ventas
 databricks bundle deploy --target sandbox --profile sandbox
 ```
 
-### Ejecución de Lote
+### Ejecución de Lote (Bootstrap FULL)
 ```bash
 databricks bundle run ventas_gold_job \
   --target sandbox \
   --profile sandbox \
-  --params batch_id=gold_initial_001,snapshot_mode=FULL
+  --params batch_id=gold_late_003,snapshot_mode=INCREMENTAL,aggregate_mode=FULL
+```
+
+### Ejecución de Lote (Operación Normal INCREMENTAL)
+```bash
+databricks bundle run ventas_gold_job \
+  --target sandbox \
+  --profile sandbox \
+  --params batch_id=gold_change_002,snapshot_mode=INCREMENTAL,aggregate_mode=INCREMENTAL
 ```

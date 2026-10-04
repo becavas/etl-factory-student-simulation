@@ -6,9 +6,13 @@ from dataclasses import asdict
 
 from pyspark.sql import SparkSession
 
+from enterprise_fabric.retail.ventas.aggregate import publish_daily_aggregate
 from enterprise_fabric.retail.ventas.dimensions import publish_dimensions
 from enterprise_fabric.retail.ventas.fact import publish_fact
-from enterprise_fabric.retail.ventas.tables import ensure_gold_tables
+from enterprise_fabric.retail.ventas.tables import (
+    ensure_aggregate_table,
+    ensure_gold_tables,
+)
 
 
 def _spark() -> SparkSession:
@@ -57,4 +61,23 @@ def run_fact() -> None:
     spark = _spark()
     ensure_gold_tables(spark, args.catalog)
     result = publish_fact(spark, args.catalog, args.batch_id)
+    print(json.dumps(asdict(result), sort_keys=True))
+
+
+def run_daily_kpi() -> None:
+    """Entry point invoked by python_wheel_task (ver nota en `run_dimensions`, Fase 9).
+
+    Esta task tampoco declara `snapshot_mode`, que sigue siendo un parámetro
+    de nivel Job consumido por `publish_ventas_dimensions`. `parse_known_args()`
+    tolera ese argumento adicional sin fallar.
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--catalog", required=True)
+    parser.add_argument("--batch_id", required=True)
+    parser.add_argument("--aggregate_mode", required=True)
+    args, _ = parser.parse_known_args()
+
+    spark = _spark()
+    ensure_aggregate_table(spark, args.catalog)
+    result = publish_daily_aggregate(spark, args.catalog, args.batch_id, args.aggregate_mode)
     print(json.dumps(asdict(result), sort_keys=True))

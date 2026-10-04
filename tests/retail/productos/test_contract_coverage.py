@@ -1,25 +1,27 @@
+import re
 from pathlib import Path
+
+from tests.retail.productos.test_bronze import (
+    COVERED_GUARANTEES as BRONZE_GUARANTEES,
+)
+from tests.retail.productos.test_silver import (
+    COVERED_GUARANTEES as SILVER_GUARANTEES,
+)
 
 README = (
     Path(__file__).parents[3] / "domains" / "retail" / "capabilities" / "productos" / "README.md"
 )
 
-EXPECTED_GUARANTEES = {
-    "PRO-BR-001",
-    "PRO-BR-002",
-    "PRO-BR-003",
-    "PRO-SI-001",
-    "PRO-SI-002",
-    "PRO-SI-003",
-    "PRO-SI-004",
-    "PRO-SI-005",
-    "PRO-SI-006",
-    "PRO-PK-001",
-}
 
-
-def test_readme_documents_all_required_guarantees():
-    assert README.is_file(), f"Missing README: {README}"
+def documented_guarantees() -> list[str]:
     text = README.read_text(encoding="utf-8")
-    missing = [gid for gid in EXPECTED_GUARANTEES if gid not in text]
-    assert not missing, f"README does not document guarantees: {missing}"
+    start = text.index("<!-- guarantees:start -->")
+    end = text.index("<!-- guarantees:end -->")
+    return re.findall(r"`(PRO-[A-Z]{2}-[0-9]{3})`", text[start:end])
+
+
+def test_every_documented_guarantee_has_declared_test_coverage():
+    documented = documented_guarantees()
+    assert len(documented) == len(set(documented)), "duplicate guarantee IDs"
+    assert len(documented) == 10
+    assert set(documented) == BRONZE_GUARANTEES | SILVER_GUARANTEES | {"PRO-PK-001"}

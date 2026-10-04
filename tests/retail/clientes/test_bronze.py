@@ -38,6 +38,7 @@ class RecordingWriter:
 
 class FrameWithRecordingWriter:
     def __init__(self):
+        self.columns = ["_ingestion_batch_id"]
         self.write = RecordingWriter()
 
 

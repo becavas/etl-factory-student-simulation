@@ -49,6 +49,7 @@ Todas las columnas de entrada se reciben como strings UTF-8:
 
 ## 5. Garantías de Calidad y Contratos de Datos
 
+<!-- guarantees:start -->
 | ID | Garantía | Acción | Descripción |
 |---|---|---|---|
 | `PRO-BR-001` | Schema fuente explícito | FAIL técnico | Lectura CSV en modo FAILFAST con StructType predefinido para ambas entidades. |
@@ -61,6 +62,7 @@ Todas las columnas de entrada se reciben como strings UTF-8:
 | `PRO-SI-005` | Duplicado exacto de categoría | OBSERVE | Repetición idéntica de payload se observa en métricas y se deduplica determinísticamente. |
 | `PRO-SI-006` | Conflicto de categoría | FAIL | Mismo `categoria_id` con payloads distintos detiene la publicación de curated para evitar decisiones arbitrarias. |
 | `PRO-PK-001` | Wheel instalado | FAIL técnico | Las tasks se ejecutan instalando el wheel `enterprise-fabric` sin dependencias de `sys.path` ni `PYTHONPATH`. |
+<!-- guarantees:end -->
 
 ---
 

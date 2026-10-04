@@ -14,6 +14,16 @@ from enterprise_fabric.retail.productos.silver import (
     with_category_rules,
     with_product_rules,
 )
+from enterprise_fabric.shared.spark import deterministic_latest
+
+COVERED_GUARANTEES = {
+    "PRO-SI-001",
+    "PRO-SI-002",
+    "PRO-SI-003",
+    "PRO-SI-004",
+    "PRO-SI-005",
+    "PRO-SI-006",
+}
 
 RAW_CATEGORY_SCHEMA = (
     "categoria_id string, nombre_categoria string, categoria_padre_id string, "
@@ -342,3 +352,125 @@ def test_publish_silver_raises_quality_gate_error_on_conflict(spark):
         assert "cat.silver.productos_quarantine" in tables_written
         assert "cat.silver.productos_curated" not in tables_written
         assert "cat.silver.categorias_curated" not in tables_written
+
+
+def test_product_deduplication_keeps_latest_source_record(spark):
+    older = make_raw_product(
+        spark,
+        producto_id="P-001",
+        fecha="2026-01-01T10:00:00Z",
+        precio="50.00",
+        hash_val="hash_older",
+    )
+    newer = make_raw_product(
+        spark,
+        producto_id="P-001",
+        fecha="2026-01-01T12:00:00Z",
+        precio="75.00",
+        hash_val="hash_newer",
+    )
+    raw = older.unionByName(newer)
+    prepared = prepare_productos(raw)
+    deduped, dup_count = deterministic_latest(prepared, ["producto_id"], "fecha_actualizacion")
+    assert dup_count == 1
+    assert deduped.count() == 1
+    row = deduped.first()
+    assert row["producto_id"] == "P-001"
+    assert row["precio_lista"] == Decimal("75.00")
+
+
+def test_publish_silver_allows_partial_publication_with_quarantine(spark):
+    c_raw = spark.createDataFrame(
+        [
+            (
+                "C-1",
+                "Tecnología",
+                None,
+                "ACTIVO",
+                "2026-01-01T10:00:00Z",
+                "productos_source",
+                "categorias",
+                "/vol/c.csv",
+                datetime(2026, 1, 1),
+                "b1",
+                "r1",
+                datetime(2026, 1, 1),
+                "h_c1",
+            ),
+            (
+                "C-2",
+                "Hogar",
+                None,
+                "INVALID_STATE",
+                "2026-01-01T10:00:00Z",
+                "productos_source",
+                "categorias",
+                "/vol/c.csv",
+                datetime(2026, 1, 1),
+                "b1",
+                "r1",
+                datetime(2026, 1, 1),
+                "h_c2",
+            ),
+        ],
+        schema=RAW_CATEGORY_SCHEMA,
+    )
+    p_raw = spark.createDataFrame(
+        [
+            (
+                "P-1",
+                "C-1",
+                "Laptop",
+                "BrandX",
+                "USD",
+                "999.00",
+                "ACTIVO",
+                "2026-01-01T10:00:00Z",
+                "productos_source",
+                "productos",
+                "/vol/p.csv",
+                datetime(2026, 1, 1),
+                "b1",
+                "r1",
+                datetime(2026, 1, 1),
+                "h_p1",
+            ),
+            (
+                "P-2",
+                "C-1",
+                "Mouse",
+                "BrandY",
+                "USD",
+                "-5.00",
+                "ACTIVO",
+                "2026-01-01T10:00:00Z",
+                "productos_source",
+                "productos",
+                "/vol/p.csv",
+                datetime(2026, 1, 1),
+                "b1",
+                "r1",
+                datetime(2026, 1, 1),
+                "h_p2",
+            ),
+        ],
+        schema=RAW_PRODUCT_SCHEMA,
+    )
+    mock_table = {
+        "cat.bronze.productos_raw": p_raw,
+        "cat.bronze.categorias_raw": c_raw,
+    }
+    with (
+        patch.object(spark, "table", side_effect=lambda name: mock_table[name]),
+        patch("enterprise_fabric.retail.productos.silver.replace_where_value") as mock_replace,
+    ):
+        result = publish_silver(spark, "cat", "b1", "qrun_partial")
+        assert result.productos_count == 1
+        assert result.categorias_count == 1
+        assert result.quarantined_count > 0
+
+        tables_written = [call.args[1] for call in mock_replace.call_args_list]
+        assert "cat.silver.productos_curated" in tables_written
+        assert "cat.silver.categorias_curated" in tables_written
+        assert "cat.silver.productos_quarantine" in tables_written
+        assert "cat.silver.productos_quality_metrics" in tables_written

@@ -16,6 +16,7 @@ def test_replace_where_rejects_missing_column():
             "training_001",
             {"capability": "test"},
         )
+    frame.write.format.assert_not_called()
 
 
 def test_replace_where_rejects_invalid_column_name():

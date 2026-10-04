@@ -108,7 +108,7 @@ class RecordingWriter:
 
 def test_replace_batch_uses_selective_overwrite() -> None:
     writer = RecordingWriter()
-    dataframe = Row(write=writer)
+    dataframe = Row(write=writer, columns=["_ingestion_batch_id"])
     replace_batch(dataframe, "retail_sbx_alumno01.bronze.pedidos_raw", "batch_001", "run-1")
     assert ("mode", "overwrite", None) in writer.calls
     assert ("option", "replaceWhere", "_ingestion_batch_id = 'batch_001'") in writer.calls

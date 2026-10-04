@@ -18,6 +18,8 @@ from enterprise_fabric.retail.productos.schemas import (
     PRODUCTOS_SOURCE_SCHEMA,
 )
 
+COVERED_GUARANTEES = {"PRO-BR-001", "PRO-BR-002", "PRO-BR-003"}
+
 
 def test_read_entity_adds_complete_lineage_and_hash(spark, tmp_path):
     csv_file = tmp_path / "batch_id=b1" / "part-0.csv"

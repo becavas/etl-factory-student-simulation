@@ -1,0 +1,35 @@
+bundle:
+  name: retail_ventas
+  databricks_cli_version: "1.12.*"
+
+include:
+  - resources/*.generated.yml
+
+sync:
+  paths:
+    - ../../../../src
+    - .
+
+artifacts:
+  default:
+    type: whl
+    build: python -m build --wheel
+    path: ../../../..
+
+variables:
+  catalog:
+    description: Catalog sandbox de retail.
+  policy_id:
+    description: Compute policy aprobada para job compute.
+  spark_version:
+    description: DBR 16.4 LTS aprobado por Data Platform.
+    default: 16.4.x-scala2.12
+  node_type_id:
+    description: Node type pequeño permitido por la policy.
+
+targets:
+  sandbox:
+    mode: development
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

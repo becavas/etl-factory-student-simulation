@@ -17,6 +17,8 @@ EXPECTED_ENTRY_POINTS = {
     "clientes-silver = enterprise_fabric.retail.clientes.entrypoints:run_silver",
     "productos-bronze = enterprise_fabric.retail.productos.entrypoints:run_bronze",
     "productos-silver = enterprise_fabric.retail.productos.entrypoints:run_silver",
+    "ventas-dimensions = enterprise_fabric.retail.ventas.entrypoints:run_dimensions",
+    "ventas-fact = enterprise_fabric.retail.ventas.entrypoints:run_fact",
 }
 EXPECTED_PACKAGE_FILES = {
     "enterprise_fabric/__init__.py",
@@ -42,6 +44,12 @@ EXPECTED_PACKAGE_FILES = {
     "enterprise_fabric/retail/productos/entrypoints.py",
     "enterprise_fabric/retail/productos/schemas.py",
     "enterprise_fabric/retail/productos/silver.py",
+    "enterprise_fabric/retail/ventas/__init__.py",
+    "enterprise_fabric/retail/ventas/dimensions.py",
+    "enterprise_fabric/retail/ventas/entrypoints.py",
+    "enterprise_fabric/retail/ventas/fact.py",
+    "enterprise_fabric/retail/ventas/keys.py",
+    "enterprise_fabric/retail/ventas/tables.py",
 }
 
 

@@ -18,6 +18,8 @@ clientes-bronze = "enterprise_fabric.retail.clientes.entrypoints:run_bronze"
 clientes-silver = "enterprise_fabric.retail.clientes.entrypoints:run_silver"
 productos-bronze = "enterprise_fabric.retail.productos.entrypoints:run_bronze"
 productos-silver = "enterprise_fabric.retail.productos.entrypoints:run_silver"
+ventas-dimensions = "enterprise_fabric.retail.ventas.entrypoints:run_dimensions"
+ventas-fact = "enterprise_fabric.retail.ventas.entrypoints:run_fact"
 
 
 

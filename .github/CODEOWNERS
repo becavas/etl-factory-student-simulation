@@ -19,6 +19,9 @@
 /domains/retail/capabilities/productos/ @becavas
 /src/enterprise_fabric/retail/productos/ @becavas
 /tests/retail/productos/ @becavas
+/domains/retail/capabilities/ventas/ @becavas
+/src/enterprise_fabric/retail/ventas/ @becavas
+/tests/retail/ventas/ @becavas
 
 # Shared primitives
 /src/enterprise_fabric/shared/ @becavas

@@ -27,7 +27,7 @@ jobs:
     tasks:
       - key: ingest_pedidos_bronze
         cluster_key: bronze_job_compute
-        timeout_seconds: 1800
+        timeout_seconds: 1801
         retry:
           max_retries: 0
         wheel:

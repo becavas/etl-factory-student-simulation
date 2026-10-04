@@ -20,6 +20,7 @@
 /src/enterprise_fabric/retail/productos/ @becavas
 /tests/retail/productos/ @becavas
 /domains/retail/capabilities/ventas/ @becavas
+/domains/retail/capabilities/ventas/contracts/ @becavas
 /src/enterprise_fabric/retail/ventas/ @becavas
 /tests/retail/ventas/ @becavas
 

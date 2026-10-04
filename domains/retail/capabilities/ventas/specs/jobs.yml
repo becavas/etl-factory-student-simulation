@@ -17,6 +17,7 @@ jobs:
     parameters:
       batch_id: gold_initial_001
       snapshot_mode: INCREMENTAL
+      aggregate_mode: INCREMENTAL
     clusters:
       - key: ventas_shared_job_compute
         profile: classic_single_user_small
@@ -51,3 +52,16 @@ jobs:
           named_parameters:
             catalog: ${var.catalog}
             batch_id: "{{job.parameters.batch_id}}"
+      - key: publish_ventas_daily_kpi
+        depends_on:
+          - publish_ventas_fact
+        cluster_key: ventas_shared_job_compute
+        timeout_seconds: 1800
+        retry:
+          max_retries: 0
+        wheel:
+          entry_point: ventas-daily-kpi
+          named_parameters:
+            catalog: ${var.catalog}
+            batch_id: "{{job.parameters.batch_id}}"
+            aggregate_mode: "{{job.parameters.aggregate_mode}}"

@@ -1,7 +1,5 @@
 """Idempotent Bronze ingestion for retail/clientes."""
 
-import json
-import re
 from dataclasses import dataclass
 
 from pyspark.sql import DataFrame, SparkSession
@@ -11,8 +9,8 @@ from enterprise_fabric.retail.clientes.schemas import (
     CLIENTES_SOURCE_COLUMNS,
     CLIENTES_SOURCE_SCHEMA,
 )
-
-BATCH_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+from enterprise_fabric.shared.delta import replace_where_value
+from enterprise_fabric.shared.identifiers import require_safe_value
 
 
 @dataclass(frozen=True)
@@ -24,9 +22,7 @@ class BronzeResult:
 
 
 def validate_identifier(value: str, field: str) -> str:
-    if not BATCH_ID_PATTERN.fullmatch(value):
-        raise ValueError(f"{field} must contain only safe identifier characters")
-    return value
+    return require_safe_value(value, field)
 
 
 def read_batch(
@@ -58,17 +54,18 @@ def read_batch(
 
 
 def replace_batch(df: DataFrame, table_name: str, batch_id: str, run_id: str) -> None:
-    batch_id = validate_identifier(batch_id, "batch_id")
-    metadata = json.dumps(
-        {"capability": "retail/clientes", "batch_id": batch_id, "run_id": run_id},
-        sort_keys=True,
-    )
-    (
-        df.write.format("delta")
-        .mode("overwrite")
-        .option("replaceWhere", f"_ingestion_batch_id = '{batch_id}'")
-        .option("userMetadata", metadata)
-        .saveAsTable(table_name)
+    batch_id = require_safe_value(batch_id, "batch_id")
+    metadata = {
+        "capability": "retail/clientes",
+        "batch_id": batch_id,
+        "run_id": run_id,
+    }
+    replace_where_value(
+        df,
+        table_name,
+        "_ingestion_batch_id",
+        batch_id,
+        metadata,
     )
 
 
@@ -79,8 +76,8 @@ def ingest_bronze(
     batch_id: str,
     run_id: str,
 ) -> BronzeResult:
-    batch_id = validate_identifier(batch_id, "batch_id")
-    run_id = validate_identifier(run_id, "run_id")
+    batch_id = require_safe_value(batch_id, "batch_id")
+    run_id = require_safe_value(run_id, "run_id")
     source_path = f"{source_volume_path.rstrip('/')}/clientes/batch_id={batch_id}"
     clientes = read_batch(spark, source_path, batch_id, run_id).cache()
     try:

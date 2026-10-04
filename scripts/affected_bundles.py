@@ -16,6 +16,8 @@ SHARED_EXACT = {
 }
 SHARED_PREFIXES = (
     "tools/bundle_generator/",
+    "src/enterprise_fabric/shared/",
+    "tests/shared/",
     "src/enterprise_fabric/capability_names.py",
     "tests/test_capability_names.py",
 )

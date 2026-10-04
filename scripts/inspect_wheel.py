@@ -15,11 +15,17 @@ EXPECTED_ENTRY_POINTS = {
     "pedidos-silver = enterprise_fabric.retail.pedidos.entrypoints:run_silver",
     "clientes-bronze = enterprise_fabric.retail.clientes.entrypoints:run_bronze",
     "clientes-silver = enterprise_fabric.retail.clientes.entrypoints:run_silver",
+    "productos-bronze = enterprise_fabric.retail.productos.entrypoints:run_bronze",
+    "productos-silver = enterprise_fabric.retail.productos.entrypoints:run_silver",
 }
 EXPECTED_PACKAGE_FILES = {
     "enterprise_fabric/__init__.py",
     "enterprise_fabric/capability_names.py",
     "enterprise_fabric/cli.py",
+    "enterprise_fabric/shared/__init__.py",
+    "enterprise_fabric/shared/delta.py",
+    "enterprise_fabric/shared/identifiers.py",
+    "enterprise_fabric/shared/spark.py",
     "enterprise_fabric/retail/pedidos/__init__.py",
     "enterprise_fabric/retail/pedidos/bronze.py",
     "enterprise_fabric/retail/pedidos/entrypoints.py",
@@ -31,6 +37,11 @@ EXPECTED_PACKAGE_FILES = {
     "enterprise_fabric/retail/clientes/entrypoints.py",
     "enterprise_fabric/retail/clientes/schemas.py",
     "enterprise_fabric/retail/clientes/silver.py",
+    "enterprise_fabric/retail/productos/__init__.py",
+    "enterprise_fabric/retail/productos/bronze.py",
+    "enterprise_fabric/retail/productos/entrypoints.py",
+    "enterprise_fabric/retail/productos/schemas.py",
+    "enterprise_fabric/retail/productos/silver.py",
 }
 
 

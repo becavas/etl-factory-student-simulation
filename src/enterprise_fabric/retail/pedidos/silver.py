@@ -1,10 +1,8 @@
 """Silver transformation and publication for retail/pedidos."""
 
-import json
-import re
 from dataclasses import dataclass
 
-from pyspark.sql import Column, DataFrame, SparkSession, Window
+from pyspark.sql import Column, DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from enterprise_fabric.retail.pedidos.bronze import validate_batch_id
@@ -16,8 +14,9 @@ from enterprise_fabric.retail.pedidos.quality import (
     normalize_text,
     rule_counts,
 )
-
-RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+from enterprise_fabric.shared.delta import replace_where_value
+from enterprise_fabric.shared.identifiers import require_safe_value
+from enterprise_fabric.shared.spark import deterministic_latest
 
 
 class QualityGateError(RuntimeError):
@@ -43,9 +42,7 @@ class SilverResult:
 
 
 def validate_run_id(run_id: str) -> str:
-    if not RUN_ID_PATTERN.fullmatch(run_id):
-        raise ValueError("quality_run_id must contain only safe identifier characters")
-    return run_id
+    return require_safe_value(run_id, "quality_run_id")
 
 
 def _raw_payload(columns: tuple[str, ...]) -> Column:
@@ -57,22 +54,8 @@ def _raw_payload(columns: tuple[str, ...]) -> Column:
 
 def _deduplicate(df: DataFrame, keys: list[str]) -> DataFrame:
     """Keep invalid keys for rule evaluation and rank complete keys deterministically."""
-    complete_key = F.lit(True)
-    for key in keys:
-        complete_key = complete_key & F.col(key).isNotNull()
-    order = [
-        F.col("fecha_actualizacion").desc_nulls_last(),
-        F.col("_source_file_modification_time").desc_nulls_last(),
-        F.col("_record_hash").desc(),
-    ]
-    window = Window.partitionBy(*keys).orderBy(*order)
-    ranked = (
-        df.where(complete_key)
-        .withColumn("_quality_rank", F.row_number().over(window))
-        .where(F.col("_quality_rank") == 1)
-        .drop("_quality_rank")
-    )
-    return ranked.unionByName(df.where(~complete_key))
+    latest, _ = deterministic_latest(df, keys, "fecha_actualizacion")
+    return latest
 
 
 def _prepare_pedidos(raw: DataFrame) -> DataFrame:
@@ -290,21 +273,6 @@ def evaluate_silver(
         items_prepared.unpersist()
 
 
-def _replace_where(
-    df: DataFrame,
-    table_name: str,
-    predicate: str,
-    metadata: dict[str, str],
-) -> None:
-    (
-        df.write.format("delta")
-        .mode("overwrite")
-        .option("replaceWhere", predicate)
-        .option("userMetadata", json.dumps(metadata, sort_keys=True))
-        .saveAsTable(table_name)
-    )
-
-
 def _assert_aligned_bronze(pedidos_raw: DataFrame, items_raw: DataFrame, batch_id: str) -> None:
     runs = {
         row["_ingestion_run_id"]
@@ -344,17 +312,18 @@ def publish_silver(
         "batch_id": batch_id,
         "quality_run_id": quality_run_id,
     }
-    run_predicate = f"quality_run_id = '{quality_run_id}'"
-    _replace_where(
+    replace_where_value(
         evaluation.metrics,
         f"{catalog}.silver.pedidos_quality_metrics",
-        run_predicate,
+        "quality_run_id",
+        quality_run_id,
         metadata,
     )
-    _replace_where(
+    replace_where_value(
         evaluation.quarantine,
         f"{catalog}.silver.pedidos_quarantine",
-        f"_quality_run_id = '{quality_run_id}'",
+        "_quality_run_id",
+        quality_run_id,
         metadata,
     )
     quarantined_count = evaluation.quarantine.count()
@@ -364,17 +333,18 @@ def publish_silver(
             f"evidence is stored for quality_run_id={quality_run_id}"
         )
 
-    batch_predicate = f"_source_batch_id = '{batch_id}'"
-    _replace_where(
+    replace_where_value(
         evaluation.pedidos_curated,
         f"{catalog}.silver.pedidos_curated",
-        batch_predicate,
+        "_source_batch_id",
+        batch_id,
         metadata,
     )
-    _replace_where(
+    replace_where_value(
         evaluation.items_curated,
         f"{catalog}.silver.pedido_items_curated",
-        batch_predicate,
+        "_source_batch_id",
+        batch_id,
         metadata,
     )
     return SilverResult(

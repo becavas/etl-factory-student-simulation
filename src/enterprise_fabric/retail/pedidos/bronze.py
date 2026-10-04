@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass
 
 from pyspark.sql import DataFrame, SparkSession
@@ -16,8 +14,8 @@ from enterprise_fabric.retail.pedidos.schemas import (
     PEDIDOS_SOURCE_COLUMNS,
     PEDIDOS_SOURCE_SCHEMA,
 )
-
-BATCH_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+from enterprise_fabric.shared.delta import replace_where_value
+from enterprise_fabric.shared.identifiers import require_safe_value
 
 
 @dataclass(frozen=True)
@@ -32,9 +30,7 @@ class BronzeResult:
 
 def validate_batch_id(batch_id: str) -> str:
     """Validate the identifier before using it in paths and SQL predicates."""
-    if not BATCH_ID_PATTERN.fullmatch(batch_id):
-        raise ValueError("batch_id must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}")
-    return batch_id
+    return require_safe_value(batch_id, "batch_id")
 
 
 def parse_bool(value: str) -> bool:
@@ -79,17 +75,17 @@ def read_source_batch(
 def replace_batch(df: DataFrame, table_name: str, batch_id: str, run_id: str) -> None:
     """Atomically replace one batch within one Delta table."""
     validated_batch_id = validate_batch_id(batch_id)
-    predicate = f"_ingestion_batch_id = '{validated_batch_id}'"
-    commit_metadata = json.dumps(
-        {"capability": "retail/pedidos", "batch_id": batch_id, "run_id": run_id},
-        sort_keys=True,
-    )
-    (
-        df.write.format("delta")
-        .mode("overwrite")
-        .option("replaceWhere", predicate)
-        .option("userMetadata", commit_metadata)
-        .saveAsTable(table_name)
+    metadata = {
+        "capability": "retail/pedidos",
+        "batch_id": batch_id,
+        "run_id": run_id,
+    }
+    replace_where_value(
+        df,
+        table_name,
+        "_ingestion_batch_id",
+        validated_batch_id,
+        metadata,
     )
 
 
@@ -103,6 +99,7 @@ def ingest_bronze(
 ) -> BronzeResult:
     """Validate both inputs, then publish the two Bronze tables in order."""
     validated_batch_id = validate_batch_id(batch_id)
+    run_id = require_safe_value(run_id, "run_id")
     base_path = source_volume_path.rstrip("/")
     pedidos_path = f"{base_path}/pedidos/batch_id={validated_batch_id}"
     items_path = f"{base_path}/pedido_items/batch_id={validated_batch_id}"

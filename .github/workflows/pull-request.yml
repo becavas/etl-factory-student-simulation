@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Set up Java for local PySpark tests
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -58,6 +60,28 @@ jobs:
 
       - name: Check generated Bundle resources
         run: python -m tools.bundle_generator generate --all --check
+
+      - name: Detect affected Bundles
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --name-only --no-renames --diff-filter=ACDMRT "$BASE_SHA" "$HEAD_SHA" \
+            > /tmp/changed-paths.txt
+          python scripts/affected_bundles.py \
+            < /tmp/changed-paths.txt \
+            > /tmp/affected-bundles.txt
+          echo "Affected Bundles:"
+          sed 's/^/- /' /tmp/affected-bundles.txt
+
+      - name: Check affected generated resources
+        run: |
+          while IFS= read -r bundle_root; do
+            [ -z "$bundle_root" ] && continue
+            python -m tools.bundle_generator generate \
+              --spec "$bundle_root/specs/jobs.yml" \
+              --check
+          done < /tmp/affected-bundles.txt
 
       - name: Build wheel
         run: python -m build --wheel

@@ -1,0 +1,18 @@
+# Default technical review
+* @becavas
+
+# Protect ownership rules and shared factory tooling
+/.github/ @becavas
+/tools/bundle_generator/ @becavas
+/docs/standards/ @becavas
+/pyproject.toml @becavas
+/environment.yml @becavas
+/scripts/ @becavas
+
+# Capability ownership
+/domains/retail/capabilities/pedidos/ @becavas
+/src/enterprise_fabric/retail/pedidos/ @becavas
+/tests/retail/pedidos/ @becavas
+/domains/retail/capabilities/clientes/ @becavas
+/src/enterprise_fabric/retail/clientes/ @becavas
+/tests/retail/clientes/ @becavas

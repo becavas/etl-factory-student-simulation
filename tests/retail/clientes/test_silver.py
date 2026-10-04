@@ -80,6 +80,8 @@ def test_deduplication_keeps_latest_source_record(spark):
         ({"email": "invalid"}, "cliente_email_valid", 0),
         ({"fecha_nacimiento": "2999-01-01"}, "cliente_birth_date_valid", 0),
         ({"pais_codigo": "PER"}, "cliente_country_valid", 0),
+        ({"pais_codigo": "12"}, "cliente_country_valid", 0),
+        ({"pais_codigo": "P1"}, "cliente_country_valid", 0),
         ({"estado": "UNKNOWN"}, "cliente_state_valid", 0),
         ({"nombres": "  "}, "cliente_name_required", 0),
     ],

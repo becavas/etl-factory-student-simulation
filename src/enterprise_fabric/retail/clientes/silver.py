@@ -84,7 +84,7 @@ def evaluate(prepared: DataFrame) -> tuple[DataFrame, dict[str, int], int]:
         ),
         "cliente_country_valid": (
             "QUARANTINE",
-            F.col("pais_codigo").isNull() | (F.length(F.col("pais_codigo")) != 2),
+            F.col("pais_codigo").isNull() | ~F.col("pais_codigo").rlike("^[A-Z]{2}$"),
         ),
         "cliente_state_valid": (
             "QUARANTINE",

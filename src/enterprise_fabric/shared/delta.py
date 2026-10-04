@@ -15,11 +15,7 @@ def replace_where_value(
     metadata: dict[str, str],
 ) -> None:
     value = require_safe_value(predicate_value, predicate_column)
-    try:
-        columns = frame.columns
-    except (AttributeError, ValueError):
-        columns = None
-    if columns is not None and predicate_column not in columns:
+    if predicate_column not in frame.columns:
         raise ValueError(f"predicate column not present: {predicate_column}")
     if not predicate_column.replace("_", "a").isalnum():
         raise ValueError("predicate_column must be a simple column name")

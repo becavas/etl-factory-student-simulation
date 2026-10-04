@@ -1,13 +1,14 @@
 """Typed Silver publication and explicit quality rules for retail/clientes."""
 
-import json
 from dataclasses import dataclass
 
-from pyspark.sql import DataFrame, SparkSession, Window
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
-from enterprise_fabric.retail.clientes.bronze import validate_identifier
 from enterprise_fabric.retail.clientes.schemas import CLIENTES_SOURCE_COLUMNS
+from enterprise_fabric.shared.delta import replace_where_value
+from enterprise_fabric.shared.identifiers import require_safe_value
+from enterprise_fabric.shared.spark import deterministic_latest, normalized_text
 
 EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
 ALLOWED_STATES = ("ACTIVO", "INACTIVO")
@@ -25,26 +26,21 @@ class SilverResult:
     quarantined_count: int
 
 
-def _text(column_name: str):
-    trimmed = F.trim(F.col(column_name))
-    return F.when(trimmed == "", F.lit(None)).otherwise(trimmed)
-
-
 def prepare(raw: DataFrame) -> DataFrame:
     payload = F.to_json(
         F.struct(*(F.col(column) for column in CLIENTES_SOURCE_COLUMNS)),
         {"ignoreNullFields": "false"},
     )
     return raw.select(
-        _text("cliente_id").alias("cliente_id"),
-        _text("nombres").alias("nombres"),
-        _text("apellidos").alias("apellidos"),
-        F.lower(_text("email")).alias("email"),
+        normalized_text(F.col("cliente_id")).alias("cliente_id"),
+        normalized_text(F.col("nombres")).alias("nombres"),
+        normalized_text(F.col("apellidos")).alias("apellidos"),
+        F.lower(normalized_text(F.col("email"))).alias("email"),
         F.expr("try_cast(nullif(trim(fecha_nacimiento), '') AS DATE)").alias("fecha_nacimiento"),
-        F.upper(_text("pais_codigo")).alias("pais_codigo"),
-        F.upper(_text("estado")).alias("estado"),
+        F.upper(normalized_text(F.col("pais_codigo"))).alias("pais_codigo"),
+        F.upper(normalized_text(F.col("estado"))).alias("estado"),
         F.try_to_timestamp(
-            _text("fecha_actualizacion"),
+            normalized_text(F.col("fecha_actualizacion")),
             F.lit("yyyy-MM-dd'T'HH:mm:ssX"),
         ).alias("fecha_actualizacion"),
         payload.alias("_raw_payload"),
@@ -59,25 +55,7 @@ def prepare(raw: DataFrame) -> DataFrame:
 
 
 def deduplicate(prepared: DataFrame) -> tuple[DataFrame, int]:
-    complete = prepared.where(F.col("cliente_id").isNotNull())
-    incomplete = prepared.where(F.col("cliente_id").isNull())
-    duplicate_row = (
-        complete.groupBy("cliente_id")
-        .count()
-        .select(F.coalesce(F.sum(F.greatest(F.col("count") - 1, F.lit(0))), F.lit(0)))
-        .first()
-    )
-    window = Window.partitionBy("cliente_id").orderBy(
-        F.col("fecha_actualizacion").desc_nulls_last(),
-        F.col("_source_file_modification_time").desc_nulls_last(),
-        F.col("_record_hash").desc(),
-    )
-    latest = (
-        complete.withColumn("_rank", F.row_number().over(window))
-        .where(F.col("_rank") == 1)
-        .drop("_rank")
-    )
-    return latest.unionByName(incomplete), int(duplicate_row[0])
+    return deterministic_latest(prepared, ["cliente_id"], "fecha_actualizacion")
 
 
 def evaluate(prepared: DataFrame) -> tuple[DataFrame, dict[str, int], int]:
@@ -101,29 +79,39 @@ def evaluate(prepared: DataFrame) -> tuple[DataFrame, dict[str, int], int]:
         "cliente_birth_date_valid": (
             "QUARANTINE",
             F.col("fecha_nacimiento").isNull()
-            | (F.col("fecha_nacimiento") < F.lit("1900-01-01").cast("date"))
+            | (F.col("fecha_nacimiento") < F.lit("1900-01-01"))
             | (F.col("fecha_nacimiento") > F.current_date()),
         ),
         "cliente_country_valid": (
             "QUARANTINE",
-            F.col("pais_codigo").isNull() | ~F.col("pais_codigo").rlike("^[A-Z]{2}$"),
+            F.col("pais_codigo").isNull() | (F.length(F.col("pais_codigo")) != 2),
         ),
         "cliente_state_valid": (
             "QUARANTINE",
             F.col("estado").isNull() | ~F.col("estado").isin(*ALLOWED_STATES),
         ),
     }
-    row = prepared.agg(
-        *(F.count(F.when(condition, 1)).alias(rule_id) for rule_id, (_, condition) in rules.items())
-    ).first()
-    counts = {rule_id: int(row[rule_id]) for rule_id in rules}
-    rule_ids = F.array_compact(
-        F.array(*(F.when(condition, F.lit(rule_id)) for rule_id, (_, condition) in rules.items()))
+
+    evaluated: dict[str, int] = {}
+    rule_arrays = []
+    fail_arrays = []
+    for rule_id, (action, condition) in rules.items():
+        evaluated[rule_id] = prepared.where(condition).count()
+        rule_arrays.append(F.when(condition, F.lit(rule_id)))
+        if action == "FAIL":
+            fail_arrays.append(F.when(condition, F.lit(rule_id)))
+
+    checked = prepared.withColumn(
+        "_quality_rule_ids",
+        F.array_compact(F.array(*rule_arrays)),
+    ).withColumn(
+        "_fail_rule_ids",
+        F.array_compact(F.array(*fail_arrays)),
     )
-    checked = prepared.withColumn("_quality_rule_ids", rule_ids)
-    fail_count = sum(counts[rule_id] for rule_id, (action, _) in rules.items() if action == "FAIL")
-    actions = {rule_id: action for rule_id, (action, _) in rules.items()}
-    return checked, {**counts, "_actions": actions}, fail_count
+    fail_count = sum(
+        evaluated[rule_id] for rule_id, (action, _) in rules.items() if action == "FAIL"
+    )
+    return checked, evaluated, fail_count
 
 
 def build_metrics(
@@ -132,32 +120,47 @@ def build_metrics(
     batch_id: str,
     total: int,
     duplicate_count: int,
-    evaluated: dict,
+    evaluated: dict[str, int],
 ) -> DataFrame:
     observed_at = spark.sql("SELECT current_timestamp() AS ts").first()["ts"]
-    actions = evaluated["_actions"]
-    values = [("cliente_duplicate", "OBSERVE", duplicate_count)] + [
-        (rule_id, actions[rule_id], count)
-        for rule_id, count in evaluated.items()
-        if rule_id != "_actions"
+    actions = {
+        "cliente_id_required": "FAIL",
+        "cliente_updated_at_valid": "FAIL",
+        "cliente_name_required": "QUARANTINE",
+        "cliente_email_valid": "QUARANTINE",
+        "cliente_birth_date_valid": "QUARANTINE",
+        "cliente_country_valid": "QUARANTINE",
+        "cliente_state_valid": "QUARANTINE",
+    }
+    rows = [
+        (
+            quality_run_id,
+            batch_id,
+            "clientes",
+            "cliente_duplicate",
+            "OBSERVE",
+            duplicate_count,
+            total,
+            observed_at,
+        )
     ]
+    for rule_id, failed in evaluated.items():
+        rows.append(
+            (
+                quality_run_id,
+                batch_id,
+                "clientes",
+                rule_id,
+                actions[rule_id],
+                failed,
+                total,
+                observed_at,
+            )
+        )
     return spark.createDataFrame(
-        [
-            (quality_run_id, batch_id, "clientes", rule_id, action, count, total, observed_at)
-            for rule_id, action, count in values
-        ],
+        rows,
         "quality_run_id string, batch_id string, entity string, rule_id string, "
         "action string, failed_records long, total_records long, observed_at_utc timestamp",
-    )
-
-
-def _replace(df: DataFrame, table: str, predicate: str, metadata: dict) -> None:
-    (
-        df.write.format("delta")
-        .mode("overwrite")
-        .option("replaceWhere", predicate)
-        .option("userMetadata", json.dumps(metadata, sort_keys=True))
-        .saveAsTable(table)
     )
 
 
@@ -167,8 +170,8 @@ def publish_silver(
     batch_id: str,
     quality_run_id: str,
 ) -> SilverResult:
-    batch_id = validate_identifier(batch_id, "batch_id")
-    quality_run_id = validate_identifier(quality_run_id, "quality_run_id")
+    batch_id = require_safe_value(batch_id, "batch_id")
+    quality_run_id = require_safe_value(quality_run_id, "quality_run_id")
     raw = spark.table(f"{catalog}.bronze.clientes_raw").where(
         F.col("_ingestion_batch_id") == batch_id
     )
@@ -197,7 +200,7 @@ def publish_silver(
         )
         curated = (
             checked.where(F.size("_quality_rule_ids") == 0)
-            .drop("_raw_payload", "_quality_rule_ids")
+            .drop("_raw_payload", "_quality_rule_ids", "_fail_rule_ids")
             .withColumnRenamed("_ingestion_batch_id", "_source_batch_id")
             .withColumn("_quality_run_id", F.lit(quality_run_id))
             .withColumn("_curated_at_utc", F.current_timestamp())
@@ -207,25 +210,28 @@ def publish_silver(
             "batch_id": batch_id,
             "quality_run_id": quality_run_id,
         }
-        _replace(
+        replace_where_value(
             metrics,
             f"{catalog}.silver.clientes_quality_metrics",
-            f"quality_run_id = '{quality_run_id}'",
+            "quality_run_id",
+            quality_run_id,
             metadata,
         )
-        _replace(
+        replace_where_value(
             quarantine,
             f"{catalog}.silver.clientes_quarantine",
-            f"_quality_run_id = '{quality_run_id}'",
+            "_quality_run_id",
+            quality_run_id,
             metadata,
         )
         quarantined_count = quarantine.count()
         if fail_count:
             raise QualityGateError(f"Batch {batch_id} failed {fail_count} mandatory cliente checks")
-        _replace(
+        replace_where_value(
             curated,
             f"{catalog}.silver.clientes_curated",
-            f"_source_batch_id = '{batch_id}'",
+            "_source_batch_id",
+            batch_id,
             metadata,
         )
         return SilverResult(batch_id, quality_run_id, curated.count(), quarantined_count)

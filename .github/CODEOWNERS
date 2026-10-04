@@ -16,3 +16,10 @@
 /domains/retail/capabilities/clientes/ @becavas
 /src/enterprise_fabric/retail/clientes/ @becavas
 /tests/retail/clientes/ @becavas
+/domains/retail/capabilities/productos/ @becavas
+/src/enterprise_fabric/retail/productos/ @becavas
+/tests/retail/productos/ @becavas
+
+# Shared primitives
+/src/enterprise_fabric/shared/ @becavas
+/tests/shared/ @becavas

@@ -12,6 +12,8 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
+from enterprise_fabric.shared.spark import normalized_text
+
 
 @dataclass(frozen=True)
 class Rule:
@@ -36,8 +38,7 @@ METRICS_SCHEMA = StructType(
 
 def normalize_text(column: Column) -> Column:
     """Trim a source string and represent blanks as null."""
-    trimmed = F.trim(column)
-    return F.when(trimmed == "", F.lit(None)).otherwise(trimmed)
+    return normalized_text(column)
 
 
 def duplicate_excess_count(df: DataFrame, keys: list[str]) -> int:
@@ -60,15 +61,24 @@ def rule_counts(df: DataFrame, rules: list[Rule]) -> dict[str, int]:
     if not rules:
         return {}
     row = df.agg(
-        *(F.count(F.when(rule.invalid_when, 1)).alias(rule.rule_id) for rule in rules)
+        *(
+            F.coalesce(
+                F.sum(F.when(rule.invalid_when, F.lit(1)).otherwise(F.lit(0))),
+                F.lit(0),
+            ).alias(rule.rule_id)
+            for rule in rules
+        )
     ).first()
     return {rule.rule_id: int(row[rule.rule_id]) for rule in rules}
 
 
 def add_rule_ids(df: DataFrame, rules: list[Rule]) -> DataFrame:
-    """Attach every violated rule ID to its record."""
-    candidates = F.array(*(F.when(rule.invalid_when, F.lit(rule.rule_id)) for rule in rules))
-    return df.withColumn("_quality_rule_ids", F.array_compact(candidates))
+    """Attach array of violated rule IDs to each row."""
+    rule_expressions = [F.when(rule.invalid_when, F.lit(rule.rule_id)) for rule in rules]
+    return df.withColumn(
+        "_quality_rule_ids",
+        F.array_compact(F.array(*rule_expressions)),
+    )
 
 
 def build_metrics(
@@ -80,20 +90,19 @@ def build_metrics(
     rules: list[Rule],
     counts: dict[str, int],
 ) -> DataFrame:
-    """Create one durable metric row per evaluated rule."""
+    """Return explicit metric rows preserving one common observation timestamp."""
     observed_at = spark.sql("SELECT current_timestamp() AS ts").first()["ts"]
-    action_by_rule = {rule.rule_id: rule.action for rule in rules}
     rows = [
         (
             quality_run_id,
             batch_id,
             entity,
-            rule_id,
-            action_by_rule[rule_id],
-            int(failed_records),
+            rule.rule_id,
+            rule.action,
+            counts[rule.rule_id],
             total_records,
             observed_at,
         )
-        for rule_id, failed_records in counts.items()
+        for rule in rules
     ]
     return spark.createDataFrame(rows, METRICS_SCHEMA)

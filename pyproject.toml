@@ -16,6 +16,8 @@ pedidos-bronze = "enterprise_fabric.retail.pedidos.entrypoints:run_bronze"
 pedidos-silver = "enterprise_fabric.retail.pedidos.entrypoints:run_silver"
 clientes-bronze = "enterprise_fabric.retail.clientes.entrypoints:run_bronze"
 clientes-silver = "enterprise_fabric.retail.clientes.entrypoints:run_silver"
+productos-bronze = "enterprise_fabric.retail.productos.entrypoints:run_bronze"
+productos-silver = "enterprise_fabric.retail.productos.entrypoints:run_silver"
 
 
 

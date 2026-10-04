@@ -1,0 +1,54 @@
+spec_version: 1
+kind: bundle_jobs
+
+metadata:
+  domain: retail
+  capability: productos
+
+package:
+  name: enterprise-fabric
+  wheel_path: ../../../../../dist/*.whl
+
+jobs:
+  - key: productos_e2e_job
+    name: retail-productos-e2e
+    layer: bronze-silver
+    max_concurrent_runs: 1
+    parameters:
+      batch_id: training_001
+    clusters:
+      - key: productos_shared_job_compute
+        profile: classic_single_user_small
+        tags:
+          layer: bronze-silver
+          policy_profile: baseline
+          target_table: productos_curated
+          workload: e2e
+    tasks:
+      - key: ingest_productos_bronze
+        cluster_key: productos_shared_job_compute
+        timeout_seconds: 1800
+        retry:
+          max_retries: 1
+          min_retry_interval_millis: 60000
+          retry_on_timeout: false
+        wheel:
+          entry_point: productos-bronze
+          named_parameters:
+            catalog: ${var.catalog}
+            source_volume_path: ${var.source_volume_path}
+            batch_id: "{{job.parameters.batch_id}}"
+            run_id: "{{job.run_id}}"
+      - key: publish_productos_silver
+        depends_on:
+          - ingest_productos_bronze
+        cluster_key: productos_shared_job_compute
+        timeout_seconds: 1800
+        retry:
+          max_retries: 0
+        wheel:
+          entry_point: productos-silver
+          named_parameters:
+            catalog: ${var.catalog}
+            batch_id: "{{job.parameters.batch_id}}"
+            quality_run_id: "{{job.run_id}}"

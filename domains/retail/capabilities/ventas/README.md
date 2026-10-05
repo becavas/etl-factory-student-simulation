@@ -67,7 +67,7 @@ La capability publica la métrica formal `ventas_netas_diarias` (versión `1.0.0
 | **Frescura** | Publicación dentro de las 4 horas posteriores a la finalización exitosa del hecho |
 | **Owners** | Negocio: `Retail Commercial Finance Governance Team` \| Técnico: `Data Engineering Retail Core Team` |
 | **Lineage** | Metadata de commit Delta registra `batch_id`, `aggregate_mode`, `metric_id` y `metric_version` |
-| **Modos de Carga** | `FULL`: Bootstrap completo de todas las fechas vigentes \| `INCREMENTAL`: Recálculo completo de fechas afectadas |
+| **Modos de Carga** | `FULL`: Bootstrap completo de todas las fechas vigentes \| `INCREMENTAL`: Compara estado completo y escribe fechas afectadas |
 | **Recuperación** | Reejecución convergente mediante `replaceWhere` por fecha |
 
 ---
@@ -94,7 +94,7 @@ La capability publica la métrica formal `ventas_netas_diarias` (versión `1.0.0
 | `VEN-KPI-002` | Grano único de agregado | FAIL | Máximo una fila por (`fecha_pedido`, `canal`, `moneda`) en la tabla agregada. |
 | `VEN-KPI-003` | Moneda única sin conversión | FAIL | Solo se admite PEN; presencia de otra moneda elegible aborta la publicación. |
 | `VEN-KPI-004` | Reconciliación pre-escritura | FAIL | Diferencia absoluta entre el hecho y el KPI no supera 0.01 PEN antes de persistir. |
-| `VEN-KPI-005` | Recomputación de fechas | OBSERVE | `FULL` cubre historia e `INCREMENTAL` recalcula fechas completas afectadas, limpiando cancelaciones. |
+| `VEN-KPI-005` | Recomputación de fechas | OBSERVE | `FULL` cubre historia e `INCREMENTAL` recalcula fechas anteriores y nuevas completas, limpiando cancelaciones y corrigiendo fechas. |
 | `VEN-KPI-006` | Cumplimiento de frescura | OBSERVE | Publicación ocurre dentro de las 4 horas posteriores al éxito del hecho. |
 | `VEN-KPI-007` | Consistencia de contrato | FAIL | Modificaciones en semántica, fórmula o grano rompen las pruebas si no se actualizan contrato y código coordinadamente. |
 <!-- guarantees:end -->

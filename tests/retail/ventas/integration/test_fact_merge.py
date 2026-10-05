@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 from delta.tables import DeltaTable
+from pyspark.errors import AnalysisException
 from pyspark.sql import functions as F
 
 from enterprise_fabric.retail.ventas.fact import merge_fact
@@ -98,6 +99,72 @@ def test_merge_preserves_omitted_fact_and_handles_cancellation(gold_spark):
     assert row._last_change_batch_id == "gold_change_002"
     assert spark.table(table).count() == 1
 
-    # Empty/omitted batch does not delete existing rows
-    # A subsequent batch without this order does not delete the row
-    assert spark.table(table).count() == 1
+    # Real omission test: process another batch with a different key (PED-2/ITEM-1)
+    line2 = spark.createDataFrame(
+        [
+            (
+                "2" * 64,
+                "PED-2",
+                "ITEM-1",
+                "2026-01-02",
+                "4" * 64,
+                "5" * 64,
+                "CLI-2",
+                "PROD-2",
+                1,
+                Decimal("50.00"),
+                Decimal("50.00"),
+                "PEN",
+                "TIENDA",
+                "ENTREGADO",
+                False,
+                "gold_late_003",
+                "hash-line2",
+            )
+        ],
+        "venta_linea_sk string, pedido_id string, item_id string, fecha_pedido string, "
+        "cliente_sk string, producto_sk string, _source_cliente_id string, "
+        "_source_producto_id string, cantidad int, precio_unitario decimal(18,2), "
+        "importe_linea decimal(18,2), moneda string, canal string, estado_pedido string, "
+        "is_cancelled boolean, _last_change_batch_id string, _payload_hash string",
+    ).withColumn("fecha_pedido", F.col("fecha_pedido").cast("date"))
+    merge_fact(spark, table, line2)
+
+    # Both rows exist and the omitted row (PED-1) was not deleted or modified
+    assert spark.table(table).count() == 2
+    row1 = spark.table(table).where(F.col("pedido_id") == "PED-1").first()
+    assert row1.is_cancelled is True
+    assert row1.estado_pedido == "CANCELADO"
+    assert row1._last_change_batch_id == "gold_change_002"
+
+    row2 = spark.table(table).where(F.col("pedido_id") == "PED-2").first()
+    assert row2.is_cancelled is False
+    assert row2.estado_pedido == "ENTREGADO"
+    assert row2._last_change_batch_id == "gold_late_003"
+
+
+def test_merge_rejects_unexpected_column_without_schema_evolution(gold_spark):
+    spark = gold_spark
+    table = "gold.fact_ventas"
+
+    initial = _source(spark, "3" * 64, batch_id="b1")
+    merge_fact(spark, table, initial)
+
+    schema_before = spark.table(table).schema
+    count_before = spark.table(table).count()
+    version_before = DeltaTable.forName(spark, table).history(1).first().version
+
+    source_unexpected = _source(spark, "4" * 64, batch_id="b2").withColumn(
+        "unexpected_column", F.lit("corrupted")
+    )
+
+    with pytest.raises(AnalysisException):
+        merge_fact(spark, table, source_unexpected)
+
+    schema_after = spark.table(table).schema
+    count_after = spark.table(table).count()
+    version_after = DeltaTable.forName(spark, table).history(1).first().version
+
+    assert schema_after == schema_before
+    assert count_after == count_before
+    assert version_after == version_before

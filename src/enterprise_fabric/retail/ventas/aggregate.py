@@ -54,17 +54,37 @@ def require_aggregate_mode(value: str) -> str:
     return value
 
 
-def incremental_dates(facts: DataFrame, batch_id: str) -> list[date]:
+def incremental_dates(facts: DataFrame, published: DataFrame, batch_id: str) -> list[date]:
     batch_id = require_safe_value(batch_id, "batch_id")
+    expected = build_daily_aggregate(facts)
+    assert_unique_grain(published)
+    comparison_columns = (
+        "ventas_netas",
+        "lineas_incluidas",
+        "unidades_vendidas",
+        "_metric_id",
+        "_metric_version",
+        "_source_max_updated_at_utc",
+    )
+    same_values = F.lit(True)
+    for column in comparison_columns:
+        same_values = same_values & F.col(f"e.{column}").eqNullSafe(F.col(f"p.{column}"))
+    differences = (
+        expected.alias("e")
+        .join(published.alias("p"), list(OUTPUT_GRAIN), "full")
+        .where(~same_values)
+        .select("fecha_pedido")
+    )
     rows = (
         facts.where(F.col("_last_change_batch_id") == batch_id)
         .select("fecha_pedido")
+        .unionByName(differences)
         .distinct()
         .orderBy("fecha_pedido")
         .collect()
     )
     if any(row.fecha_pedido is None for row in rows):
-        raise SemanticContractError("affected fact has null fecha_pedido")
+        raise SemanticContractError("affected date is null in fact or aggregate")
     return [row.fecha_pedido for row in rows]
 
 
@@ -186,7 +206,7 @@ def publish_daily_aggregate(
         affected_date_count = facts.select("fecha_pedido").distinct().count()
         scope = facts.cache()
     else:
-        dates = incremental_dates(facts, batch_id)
+        dates = incremental_dates(facts, spark.table(target_name), batch_id)
         if not dates:
             return AggregateResult(batch_id, aggregate_mode, 0, 0, "NO_CHANGES")
         affected_date_count = len(dates)

@@ -10,7 +10,20 @@ from enterprise_fabric.retail.pedidos.bronze import ingest_bronze, parse_bool
 from enterprise_fabric.retail.pedidos.silver import publish_silver
 
 
-def run_bronze() -> None:
+def build_bronze_parser() -> argparse.ArgumentParser:
+    """Build the strict argument parser for Bronze task."""
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument("--catalog", required=True)
+    parser.add_argument("--source_volume_path", required=True)
+    parser.add_argument("--batch_id", required=True)
+    parser.add_argument("--run_id", required=True)
+    parser.add_argument("--fail_after_pedidos", default="false")
+    parser.add_argument("--snapshot_mode", choices=("FULL", "INCREMENTAL"), default=None)
+    parser.add_argument("--aggregate_mode", choices=("FULL", "INCREMENTAL"), default=None)
+    return parser
+
+
+def run_bronze(argv: list[str] | None = None) -> None:
     """Entry point invoked by python_wheel_task.
 
     Databricks resuelve este entry point vía `pyproject.toml` y lo invoca
@@ -21,13 +34,7 @@ def run_bronze() -> None:
     Por eso este entry point parsea `sys.argv` explícitamente en vez de
     declarar los parámetros como argumentos de función.
     """
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--catalog", required=True)
-    parser.add_argument("--source_volume_path", required=True)
-    parser.add_argument("--batch_id", required=True)
-    parser.add_argument("--run_id", required=True)
-    parser.add_argument("--fail_after_pedidos", default="false")
-    args, _ = parser.parse_known_args()
+    args = build_bronze_parser().parse_args(argv)
 
     spark = SparkSession.getActiveSession()
     if spark is None:
@@ -52,6 +59,8 @@ def build_silver_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--fail_after_pedidos", type=parse_bool, default=False, help=argparse.SUPPRESS
     )
+    parser.add_argument("--snapshot_mode", choices=("FULL", "INCREMENTAL"), default=None)
+    parser.add_argument("--aggregate_mode", choices=("FULL", "INCREMENTAL"), default=None)
     return parser
 
 
@@ -64,11 +73,11 @@ def run_silver(argv: list[str] | None = None) -> None:
     argumentos de función.
 
     Los parámetros de nivel Job se propagan a las wheel tasks con
-    named_parameters. Se declara fail_after_pedidos como argumento común
-    conocido, sin usarlo para cambiar la publicación Silver. Los demás
-    argumentos desconocidos se toleran para soportar orquestación de dominio.
+    named_parameters. Se declaran snapshot_mode, aggregate_mode y
+    fail_after_pedidos como argumentos comunes conocidos, sin usarlos
+    para cambiar la publicación Silver.
     """
-    args, _ = build_silver_parser().parse_known_args(argv)
+    args = build_silver_parser().parse_args(argv)
 
     spark = SparkSession.getActiveSession()
     if spark is None:

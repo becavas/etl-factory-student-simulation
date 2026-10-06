@@ -17,14 +17,21 @@ def _spark() -> SparkSession:
     return spark
 
 
-def run_bronze() -> None:
-    """Entry point invoked by python_wheel_task."""
-    parser = argparse.ArgumentParser()
+def build_bronze_parser() -> argparse.ArgumentParser:
+    """Build the strict argument parser for Bronze task."""
+    parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--source_volume_path", required=True)
     parser.add_argument("--batch_id", required=True)
     parser.add_argument("--run_id", required=True)
-    args, _ = parser.parse_known_args()
+    parser.add_argument("--snapshot_mode", choices=("FULL", "INCREMENTAL"), default=None)
+    parser.add_argument("--aggregate_mode", choices=("FULL", "INCREMENTAL"), default=None)
+    return parser
+
+
+def run_bronze(argv: list[str] | None = None) -> None:
+    """Entry point invoked by python_wheel_task."""
+    args = build_bronze_parser().parse_args(argv)
 
     result = ingest_bronze(
         _spark(),
@@ -36,13 +43,20 @@ def run_bronze() -> None:
     print(json.dumps(asdict(result), sort_keys=True))
 
 
-def run_silver() -> None:
-    """Entry point invoked by python_wheel_task."""
-    parser = argparse.ArgumentParser()
+def build_silver_parser() -> argparse.ArgumentParser:
+    """Build the strict argument parser for Silver task."""
+    parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--batch_id", required=True)
     parser.add_argument("--quality_run_id", required=True)
-    args, _ = parser.parse_known_args()
+    parser.add_argument("--snapshot_mode", choices=("FULL", "INCREMENTAL"), default=None)
+    parser.add_argument("--aggregate_mode", choices=("FULL", "INCREMENTAL"), default=None)
+    return parser
+
+
+def run_silver(argv: list[str] | None = None) -> None:
+    """Entry point invoked by python_wheel_task."""
+    args = build_silver_parser().parse_args(argv)
 
     result = publish_silver(_spark(), args.catalog, args.batch_id, args.quality_run_id)
     print(json.dumps(asdict(result), sort_keys=True))

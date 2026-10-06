@@ -27,7 +27,7 @@ def run_bronze() -> None:
     parser.add_argument("--batch_id", required=True)
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--fail_after_pedidos", default="false")
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     spark = SparkSession.getActiveSession()
     if spark is None:
@@ -66,9 +66,9 @@ def run_silver(argv: list[str] | None = None) -> None:
     Los parámetros de nivel Job se propagan a las wheel tasks con
     named_parameters. Se declara fail_after_pedidos como argumento común
     conocido, sin usarlo para cambiar la publicación Silver. Los demás
-    argumentos desconocidos siguen siendo errores de configuración.
+    argumentos desconocidos se toleran para soportar orquestación de dominio.
     """
-    args = build_silver_parser().parse_args(argv)
+    args, _ = build_silver_parser().parse_known_args(argv)
 
     spark = SparkSession.getActiveSession()
     if spark is None:

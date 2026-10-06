@@ -29,7 +29,7 @@ def run_bronze() -> None:
     parser.add_argument("--source_volume_path", required=True)
     parser.add_argument("--batch_id", required=True)
     parser.add_argument("--run_id", required=True)
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     result = ingest_bronze(
         _spark(), args.catalog, args.source_volume_path, args.batch_id, args.run_id
@@ -43,7 +43,7 @@ def run_silver() -> None:
     parser.add_argument("--catalog", required=True)
     parser.add_argument("--batch_id", required=True)
     parser.add_argument("--quality_run_id", required=True)
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     result = publish_silver(_spark(), args.catalog, args.batch_id, args.quality_run_id)
     print(json.dumps(asdict(result), sort_keys=True))

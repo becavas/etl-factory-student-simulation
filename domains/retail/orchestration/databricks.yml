@@ -1,0 +1,44 @@
+bundle:
+  name: retail_orchestration
+  databricks_cli_version: "1.12.*"
+
+include:
+  - resources/*.yml
+
+variables:
+  pedidos_job_name:
+    description: Effective deployed name of retail pedidos E2E job
+    default: "[dev ${workspace.current_user.short_name}] retail-pedidos-e2e"
+  clientes_job_name:
+    description: Effective deployed name of retail clientes E2E job
+    default: "[dev ${workspace.current_user.short_name}] retail-clientes-e2e"
+  productos_job_name:
+    description: Effective deployed name of retail productos E2E job
+    default: "[dev ${workspace.current_user.short_name}] retail-productos-e2e"
+  ventas_job_name:
+    description: Effective deployed name of retail ventas Gold job
+    default: "[dev ${workspace.current_user.short_name}] retail-ventas-gold"
+
+  pedidos_job_id:
+    description: Resolved workspace ID for pedidos
+    lookup:
+      job: ${var.pedidos_job_name}
+  clientes_job_id:
+    description: Resolved workspace ID for clientes
+    lookup:
+      job: ${var.clientes_job_name}
+  productos_job_id:
+    description: Resolved workspace ID for productos
+    lookup:
+      job: ${var.productos_job_name}
+  ventas_job_id:
+    description: Resolved workspace ID for ventas
+    lookup:
+      job: ${var.ventas_job_name}
+
+targets:
+  sandbox:
+    mode: development
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

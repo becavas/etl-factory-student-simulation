@@ -79,9 +79,11 @@ jobs:
         run: |
           while IFS= read -r bundle_root; do
             [ -z "$bundle_root" ] && continue
-            python -m tools.bundle_generator generate \
-              --spec "$bundle_root/specs/jobs.yml" \
-              --check
+            if [ -f "$bundle_root/specs/jobs.yml" ]; then
+              python -m tools.bundle_generator generate \
+                --spec "$bundle_root/specs/jobs.yml" \
+                --check
+            fi
           done < /tmp/affected-bundles.txt
 
       - name: Build wheel

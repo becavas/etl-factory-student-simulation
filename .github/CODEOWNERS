@@ -27,3 +27,8 @@
 # Shared primitives
 /src/enterprise_fabric/shared/ @becavas
 /tests/shared/ @becavas
+
+# Domain orchestration
+/domains/retail/orchestration/ @becavas
+/tests/domains/retail/orchestration/ @becavas
+

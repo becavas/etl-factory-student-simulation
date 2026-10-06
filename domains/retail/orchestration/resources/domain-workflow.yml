@@ -1,0 +1,58 @@
+resources:
+  jobs:
+    retail_domain_e2e_job:
+      name: retail-domain-e2e
+      max_concurrent_runs: 1
+      timeout_seconds: 14400
+      queue:
+        enabled: true
+      parameters:
+        - name: batch_id
+          default: domain_valid_001
+        - name: snapshot_mode
+          default: INCREMENTAL
+        - name: aggregate_mode
+          default: INCREMENTAL
+      tags:
+        domain: retail
+        layer: cross-layer
+        managed_by: bundle
+        environment: ${bundle.target}
+      tasks:
+        - task_key: run_pedidos
+          timeout_seconds: 3600
+          max_retries: 0
+          run_job_task:
+            job_id: ${var.pedidos_job_id}
+            job_parameters:
+              batch_id: "{{job.parameters.batch_id}}"
+
+        - task_key: run_clientes
+          timeout_seconds: 3600
+          max_retries: 0
+          run_job_task:
+            job_id: ${var.clientes_job_id}
+            job_parameters:
+              batch_id: "{{job.parameters.batch_id}}"
+
+        - task_key: run_productos
+          timeout_seconds: 3600
+          max_retries: 0
+          run_job_task:
+            job_id: ${var.productos_job_id}
+            job_parameters:
+              batch_id: "{{job.parameters.batch_id}}"
+
+        - task_key: run_ventas
+          depends_on:
+            - task_key: run_pedidos
+            - task_key: run_clientes
+            - task_key: run_productos
+          timeout_seconds: 5400
+          max_retries: 0
+          run_job_task:
+            job_id: ${var.ventas_job_id}
+            job_parameters:
+              batch_id: "{{job.parameters.batch_id}}"
+              snapshot_mode: "{{job.parameters.snapshot_mode}}"
+              aggregate_mode: "{{job.parameters.aggregate_mode}}"

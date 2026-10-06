@@ -13,10 +13,12 @@ SHARED_EXACT = {
     ".github/workflows/pull-request.yml",
     "scripts/affected_bundles.py",
     "scripts/inspect_wheel.py",
+    "scripts/require_unique_job.py",
 }
 SHARED_PREFIXES = (
     "tools/bundle_generator/",
     "src/enterprise_fabric/shared/",
+    "src/enterprise_fabric/core/",
     "tests/shared/",
     "src/enterprise_fabric/capability_names.py",
     "tests/test_capability_names.py",
@@ -25,10 +27,19 @@ SHARED_PREFIXES = (
 
 def discover_bundles() -> dict[tuple[str, str], str]:
     bundles = {}
-    for bundle in sorted(REPO_ROOT.glob("domains/*/capabilities/*/databricks.yml")):
-        capability_root = bundle.parent
-        key = (capability_root.parents[1].name, capability_root.name)
-        bundles[key] = capability_root.relative_to(REPO_ROOT).as_posix()
+    patterns = (
+        "domains/*/capabilities/*/databricks.yml",
+        "domains/*/orchestration/databricks.yml",
+    )
+    for pattern in patterns:
+        for config in sorted(REPO_ROOT.glob(pattern)):
+            root = config.parent
+            relative = root.relative_to(REPO_ROOT).as_posix()
+            if root.name == "orchestration":
+                key = (root.parent.name, "orchestration")
+            else:
+                key = (root.parents[1].name, root.name)
+            bundles[key] = relative
     return bundles
 
 
@@ -53,8 +64,22 @@ def affected_bundles(paths: list[str]) -> list[str]:
                     f"Ruta de capability sin Bundle actual: {path}. "
                     "Revisa si se eliminó un Bundle; su retiro requiere un procedimiento explícito."
                 )
+        elif len(parts) >= 4 and parts[0] == "domains" and parts[2] == "orchestration":
+            key = (parts[1], "orchestration")
+            if key in known:
+                selected.add(known[key])
+            else:
+                raise ValueError(
+                    f"Ruta de orquestación sin Bundle actual: {path}. "
+                    "Revisa si se eliminó un Bundle; su retiro requiere un procedimiento explícito."
+                )
         elif len(parts) >= 4 and parts[0] in {"src", "tests"}:
-            offset = 2 if parts[0] == "src" and parts[1] == "enterprise_fabric" else 1
+            if parts[0] == "src" and parts[1] == "enterprise_fabric":
+                offset = 2
+            elif parts[0] == "tests" and parts[1] == "domains":
+                offset = 2
+            else:
+                offset = 1
             if len(parts) > offset + 1:
                 key = (parts[offset], parts[offset + 1])
                 if key in known:

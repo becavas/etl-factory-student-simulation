@@ -44,3 +44,18 @@ No se aceptan propiedades libres. Para soportar un campo nuevo:
 
 Herramientas de especificación o asistentes de código pueden proponer cambios sobre la spec,
 pero no sustituyen schema, generator tests, revisión humana ni gates de CI.
+
+## Recursos nativos fuera de la spec v1
+
+La spec v1 cubre Jobs de capability basados en Python wheel y classic job compute.
+Un patrón no soportado puede permanecer como YAML nativo cuando todavía no existe
+repetición suficiente para ampliar el generador.
+
+El recurso nativo debe:
+
+- tener ownership y propósito explícitos;
+- ser pequeño y no contener mapas libres de configuración empresarial;
+- pasar tests estructurales y `databricks bundle validate`;
+- permanecer como única fuente de verdad, sin una spec paralela;
+- justificar una ampliación del generador cuando aparezca un segundo consumidor real.
+

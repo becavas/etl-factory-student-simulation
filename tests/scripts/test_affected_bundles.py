@@ -5,7 +5,8 @@ CLIENTES = "domains/retail/capabilities/clientes"
 PEDIDOS = "domains/retail/capabilities/pedidos"
 PRODUCTOS = "domains/retail/capabilities/productos"
 VENTAS = "domains/retail/capabilities/ventas"
-ALL_CAPABILITIES = [CLIENTES, PEDIDOS, PRODUCTOS, VENTAS]
+ORCHESTRATION = "domains/retail/orchestration"
+ALL_BUNDLES = sorted([CLIENTES, PEDIDOS, PRODUCTOS, VENTAS, ORCHESTRATION])
 
 
 def test_clientes_only_change_selects_only_clientes():
@@ -24,12 +25,22 @@ def test_ventas_only_change_selects_only_ventas():
     assert affected_bundles(["src/enterprise_fabric/retail/ventas/fact.py"]) == [VENTAS]
 
 
+def test_orchestration_change_selects_only_orchestration():
+    assert affected_bundles(["domains/retail/orchestration/resources/domain-workflow.yml"]) == [
+        ORCHESTRATION
+    ]
+
+
+def test_shared_change_selects_capabilities_and_orchestration():
+    assert affected_bundles([".github/workflows/pull-request.yml"]) == ALL_BUNDLES
+
+
 def test_shared_generator_change_selects_every_capability():
-    assert affected_bundles(["tools/bundle_generator/generator.py"]) == ALL_CAPABILITIES
+    assert affected_bundles(["tools/bundle_generator/generator.py"]) == ALL_BUNDLES
 
 
-def test_shared_change_selects_every_capability():
-    assert affected_bundles(["src/enterprise_fabric/shared/spark.py"]) == ALL_CAPABILITIES
+def test_shared_code_change_selects_every_capability():
+    assert affected_bundles(["src/enterprise_fabric/shared/spark.py"]) == ALL_BUNDLES
 
 
 def test_docs_only_change_selects_no_capability():
@@ -39,3 +50,8 @@ def test_docs_only_change_selects_no_capability():
 def test_removed_bundle_does_not_disappear_silently():
     with pytest.raises(ValueError, match="sin Bundle actual"):
         affected_bundles(["domains/retail/capabilities/retirada/databricks.yml"])
+
+
+def test_removed_orchestration_bundle_does_not_disappear_silently():
+    with pytest.raises(ValueError, match="sin Bundle actual"):
+        affected_bundles(["domains/retail_other/orchestration/databricks.yml"])

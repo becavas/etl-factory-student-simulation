@@ -11,9 +11,13 @@ SHARED_EXACT = {
     "pyproject.toml",
     ".github/CODEOWNERS",
     ".github/workflows/pull-request.yml",
+    ".github/workflows/deploy-dev.yml",
     "scripts/affected_bundles.py",
     "scripts/inspect_wheel.py",
+    "scripts/prepare_bundle_artifact.py",
     "scripts/require_unique_job.py",
+    "scripts/verify_ci_identity.py",
+    "scripts/write_deployment_record.py",
 }
 SHARED_PREFIXES = (
     "tools/bundle_generator/",

@@ -17,6 +17,25 @@ Este repositorio consume los siguientes recursos. Su aprovisionamiento y lifecyc
 | Volume | `productos_source` | `retail_sbx_a001.landing.productos_source` | `READ VOLUME` y dataset de capacitación | Data Platform | Verificado |
 | Compute policy | `uc_standard_job_compute` | Policy ID administrado externamente | `CAN_USE`, classic job compute, `SINGLE_USER` permitido | Data Platform | Verificado |
 
+## DEV
+
+| Tipo | Nombre lógico | Nombre físico | Garantía requerida | Owner | Estado |
+|---|---|---|---|---|---|
+| Workspace | `dev` | Workspace compartido DEV | URL oficial y workspace assignment de ambos SPs | Data Platform | Verificado |
+| Deployer SP | `etl-factory-dev-deployer` | SP deployer en workspace | Application ID, WIF OIDC y permisos de despliegue | IAM / Data Platform | Verificado |
+| Runtime SP | `etl-factory-dev-runtime` | SP runtime en workspace | Application ID estable y workspace assignment | IAM / Data Platform | Verificado |
+| SP role | `Service Principal User` | Rol deployer → runtime | Deployer autorizado a configurar Run as del runtime | IAM | Pendiente |
+| Catálogo | `retail_dev` | `retail_dev` | Catálogo aislado y schemas `landing`, `bronze`, `silver`, `gold` | Data Platform | Verificado |
+| Volume | `pedidos_source` | `retail_dev.landing.pedidos_source` | `READ VOLUME` en fuentes gobernadas DEV | Data Platform | Verificado |
+| Volume | `clientes_source` | `retail_dev.landing.clientes_source` | `READ VOLUME` en fuentes gobernadas DEV | Data Platform | Verificado |
+| Volume | `productos_source` | `retail_dev.landing.productos_source` | `READ VOLUME` en fuentes gobernadas DEV | Data Platform | Verificado |
+| Compute policy | `policy-factory-sandbox-uc-standard-job-compute` | `0014E7B094CA30EB` | `CAN_USE` para deployer y runtime SPs; node `Standard_F4s_v2` | Data Platform | Pendiente |
+| UC grants | Permisos runtime DEV | Grants sobre `retail_dev` | Runtime autorizado a leer Landing y publicar Bronze/Silver/Gold | Data Governance | Pendiente |
+| Child Job ACL | Child Job permissions | `CAN_MANAGE_RUN` en child jobs | Runtime puede ejecutar children desde el parent | Bundle configuration | Verificado |
+| Carpeta Bundle | State compartido | `/Workspace/Shared/.bundle` | Carpeta de state escribible por deployer | Data Platform | Verificado |
+| Grupo operador | Operador DEV | `admins` | Grupo con permisos de ejecución/observación | Data Governance | Verificado |
+| GitHub Environment | `dev` | Environment `dev` | Deployment branch restricted a `main` y 6 variables configuradas | Repository admin | Verificado |
+
 ## Contrato de acceso
 
 - El Data Engineer utiliza identidad personal solo en sandbox.

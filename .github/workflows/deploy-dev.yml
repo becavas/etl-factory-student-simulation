@@ -1,0 +1,249 @@
+name: deploy-dev
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  select-and-check:
+    name: select-and-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      bundles: ${{ steps.scope.outputs.bundles }}
+      count: ${{ steps.scope.outputs.count }}
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java for Spark and Delta tests
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install quality tools
+        run: |
+          python -m pip install --disable-pip-version-check \
+            build==1.5.0 \
+            hatchling==1.32.0 \
+            pytest==9.1.1 \
+            ruff==0.16.3 \
+            PyYAML==6.0.3 \
+            jsonschema==4.26.0 \
+            pyspark==3.5.2 \
+            delta-spark==3.1.0
+          python -m pip install --no-deps .
+
+      - name: Run offline gates on merge commit
+        run: |
+          ruff format --check .
+          ruff check .
+          python -m pytest -q
+          python -m tools.bundle_generator generate --all --check
+          python scripts/prepare_bundle_artifact.py
+          python scripts/inspect_wheel.py dist/*.whl
+
+      - name: Determine changed paths
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$BEFORE_SHA" ] \
+            && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ] \
+            && git cat-file -e "$BEFORE_SHA^{commit}"; then
+            git diff --name-only --no-renames --diff-filter=ACDMRT \
+              "$BEFORE_SHA" "$CURRENT_SHA" > /tmp/changed-paths.txt
+          else
+            git diff-tree --root --no-commit-id --name-only -r \
+              "$CURRENT_SHA" > /tmp/changed-paths.txt
+          fi
+
+      - name: Select affected Bundles
+        id: scope
+        run: |
+          python scripts/affected_bundles.py \
+            < /tmp/changed-paths.txt \
+            > /tmp/affected-bundles.txt
+          bundles=$(jq -Rsc 'split("\n") | map(select(length > 0))' \
+            /tmp/affected-bundles.txt)
+          count=$(jq 'length' <<< "$bundles")
+          echo "bundles=$bundles" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          sed 's/^/- /' /tmp/affected-bundles.txt
+
+      - name: Upload wheel for the deploy job
+        if: steps.scope.outputs.count != '0'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: dev-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy-dev:
+    name: deploy-dev
+    needs: select-and-check
+    if: needs.select-and-check.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: github-oidc
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+      BUNDLE_VAR_runtime_sp_client_id: ${{ vars.DATABRICKS_RUNTIME_SP_CLIENT_ID }}
+      BUNDLE_VAR_operator_group: ${{ vars.DATABRICKS_OPERATOR_GROUP }}
+      BUNDLE_VAR_policy_id: ${{ vars.DATABRICKS_POLICY_ID }}
+      BUNDLE_VAR_node_type_id: ${{ vars.DATABRICKS_NODE_TYPE_ID }}
+      BUNDLE_VAR_git_sha: ${{ github.sha }}
+      BUNDLES_JSON: ${{ needs.select-and-check.outputs.bundles }}
+      EF_USE_PREBUILT_WHEEL: "true"
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Download the wheel built by offline gates
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: dev-build-${{ github.sha }}-${{ github.run_attempt }}
+          path: dist
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --disable-pip-version-check \
+            build==1.5.0 \
+            hatchling==1.32.0
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@903f2679e2ca728decb4a78c74d57570f8e8d2e5 # v1.12.1
+
+      - name: Verify immutable wheel
+        run: |
+          wheel=$(find dist -maxdepth 1 -type f \
+            -name 'enterprise_fabric-*.whl' -print)
+          test -n "$wheel"
+          test "$(printf '%s\n' "$wheel" | wc -l | tr -d ' ')" = "1"
+          wheel_sha256=$(sha256sum "$wheel" | cut -d ' ' -f 1)
+          echo "EF_EXPECTED_WHEEL_SHA256=$wheel_sha256" >> "$GITHUB_ENV"
+          echo "RELEASE_WHEEL=$wheel" >> "$GITHUB_ENV"
+
+      - name: Reject missing shared-target configuration
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test -n "$DATABRICKS_HOST"
+          test -n "$DATABRICKS_CLIENT_ID"
+          test -n "$BUNDLE_VAR_runtime_sp_client_id"
+          test -n "$BUNDLE_VAR_operator_group"
+          test -n "$BUNDLE_VAR_policy_id"
+          test -n "$BUNDLE_VAR_node_type_id"
+          test "$DATABRICKS_CLIENT_ID" != "$BUNDLE_VAR_runtime_sp_client_id"
+          test "$BUNDLE_VAR_runtime_sp_client_id" != "__required_in_shared_target__"
+          test "$BUNDLE_VAR_operator_group" != "__required_in_shared_target__"
+
+      - name: Verify federated caller
+        run: |
+          databricks current-user me --output json > /tmp/current-user.json
+          python scripts/verify_ci_identity.py \
+            --expected-client-id "$DATABRICKS_CLIENT_ID" \
+            < /tmp/current-user.json
+          databricks version
+
+      - name: Validate and plan exact scope
+        run: |
+          mkdir -p /tmp/dev-deployment
+          jq -r '.[]' <<< "$BUNDLES_JSON" > /tmp/affected-bundles.txt
+          while IFS= read -r bundle_root; do
+            [ -z "$bundle_root" ] && continue
+            key=$(printf '%s' "$bundle_root" | tr '/' '_')
+            (
+              cd "$bundle_root"
+              databricks bundle validate --target dev --output json \
+                > "/tmp/dev-deployment/$key.validate.json"
+              databricks bundle plan --target dev \
+                > "/tmp/dev-deployment/$key.plan.txt"
+            )
+          done < /tmp/affected-bundles.txt
+
+      - name: Deploy capabilities first
+        run: |
+          while IFS= read -r bundle_root; do
+            [ -z "$bundle_root" ] && continue
+            case "$bundle_root" in
+              */orchestration) continue ;;
+            esac
+            (cd "$bundle_root" && databricks bundle deploy --target dev)
+          done < /tmp/affected-bundles.txt
+
+      - name: Deploy orchestration last
+        run: |
+          while IFS= read -r bundle_root; do
+            [ -z "$bundle_root" ] && continue
+            case "$bundle_root" in
+              */orchestration)
+                (cd "$bundle_root" && databricks bundle deploy --target dev)
+                ;;
+            esac
+          done < /tmp/affected-bundles.txt
+
+      - name: Capture deployed summaries
+        run: |
+          while IFS= read -r bundle_root; do
+            [ -z "$bundle_root" ] && continue
+            key=$(printf '%s' "$bundle_root" | tr '/' '_')
+            (
+              cd "$bundle_root"
+              databricks bundle summary --target dev --output json \
+                > "/tmp/dev-deployment/$key.summary.json"
+            )
+          done < /tmp/affected-bundles.txt
+
+      - name: Build successful deployment record
+        run: |
+          mkdir -p /tmp/dev-release/evidence
+          python scripts/write_deployment_record.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --sha "$GITHUB_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --target dev \
+            --bundles-file /tmp/affected-bundles.txt \
+            --evidence-dir /tmp/dev-deployment \
+            --artifact "$RELEASE_WHEEL" \
+            --artifact-sha256 "$EF_EXPECTED_WHEEL_SHA256" \
+            --output /tmp/dev-release/deployment-record.json
+          cp "$RELEASE_WHEEL" /tmp/dev-release/
+          cp /tmp/dev-deployment/* /tmp/dev-release/evidence/
+          python -m json.tool /tmp/dev-release/deployment-record.json
+
+      - name: Upload deployment evidence
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: dev-release-${{ github.sha }}-${{ github.run_attempt }}
+          path: /tmp/dev-release/
+          if-no-files-found: error
+          retention-days: 90

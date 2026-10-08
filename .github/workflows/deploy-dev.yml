@@ -173,12 +173,14 @@ jobs:
             < /tmp/current-user.json
           databricks version
 
-      - name: Validate and plan exact scope
+      - name: Validate and plan affected capabilities
         run: |
           mkdir -p /tmp/dev-deployment
           jq -r '.[]' <<< "$BUNDLES_JSON" > /tmp/affected-bundles.txt
           while IFS= read -r bundle_root; do
-            [ -z "$bundle_root" ] && continue
+            case "$bundle_root" in
+              ""|*/orchestration) continue ;;
+            esac
             key=$(printf '%s' "$bundle_root" | tr '/' '_')
             (
               cd "$bundle_root"
@@ -199,13 +201,21 @@ jobs:
             (cd "$bundle_root" && databricks bundle deploy --target dev)
           done < /tmp/affected-bundles.txt
 
-      - name: Deploy orchestration last
+      - name: Validate, plan, and deploy orchestration last
         run: |
           while IFS= read -r bundle_root; do
             [ -z "$bundle_root" ] && continue
             case "$bundle_root" in
               */orchestration)
-                (cd "$bundle_root" && databricks bundle deploy --target dev)
+                key=$(printf '%s' "$bundle_root" | tr '/' '_')
+                (
+                  cd "$bundle_root"
+                  databricks bundle validate --target dev --output json \
+                    > "/tmp/dev-deployment/$key.validate.json"
+                  databricks bundle plan --target dev \
+                    > "/tmp/dev-deployment/$key.plan.txt"
+                  databricks bundle deploy --target dev
+                )
                 ;;
             esac
           done < /tmp/affected-bundles.txt

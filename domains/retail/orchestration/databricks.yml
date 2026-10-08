@@ -6,6 +6,15 @@ include:
   - resources/*.yml
 
 variables:
+  runtime_sp_client_id:
+    description: Application ID del service principal runtime del ambiente.
+    default: __required_in_shared_target__
+  operator_group:
+    description: Grupo operador autorizado en el ambiente compartido.
+    default: __required_in_shared_target__
+  git_sha:
+    description: Commit exacto desplegado por CI/CD.
+    default: local-uncommitted
   pedidos_job_name:
     description: Effective deployed name of retail pedidos E2E job
     default: "[dev ${workspace.current_user.short_name}] retail-pedidos-e2e"
@@ -42,3 +51,23 @@ targets:
     default: true
     workspace:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+
+  dev:
+    mode: production
+    git:
+      branch: main
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.runtime_sp_client_id}
+    permissions:
+      - group_name: ${var.operator_group}
+        level: CAN_RUN
+    presets:
+      tags:
+        deployed_commit: ${var.git_sha}
+    variables:
+      pedidos_job_name: retail-pedidos-e2e
+      clientes_job_name: retail-clientes-e2e
+      productos_job_name: retail-productos-e2e
+      ventas_job_name: retail-ventas-gold

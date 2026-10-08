@@ -13,10 +13,19 @@ sync:
 artifacts:
   default:
     type: whl
-    build: python -m build --wheel
+    build: python scripts/prepare_bundle_artifact.py
     path: ../../../..
 
 variables:
+  runtime_sp_client_id:
+    description: Application ID del service principal runtime del ambiente.
+    default: __required_in_shared_target__
+  operator_group:
+    description: Grupo operador autorizado en el ambiente compartido.
+    default: __required_in_shared_target__
+  git_sha:
+    description: Commit exacto desplegado por CI/CD.
+    default: local-uncommitted
   catalog:
     description: Catalog sandbox de retail.
   policy_id:
@@ -33,3 +42,26 @@ targets:
     default: true
     workspace:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+
+  dev:
+    mode: production
+    git:
+      branch: main
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.runtime_sp_client_id}
+    permissions:
+      - group_name: ${var.operator_group}
+        level: CAN_RUN
+    presets:
+      tags:
+        deployed_commit: ${var.git_sha}
+    variables:
+      catalog: retail_dev
+    resources:
+      jobs:
+        ventas_gold_job:
+          permissions:
+            - service_principal_name: ${var.runtime_sp_client_id}
+              level: CAN_MANAGE_RUN

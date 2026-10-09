@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      pause_after_first_capability:
+        description: "Laboratorio §36: pausar tras la primera capability"
+        type: boolean
+        default: false
+        required: false
 
 concurrency:
   group: deploy-dev
@@ -118,6 +124,7 @@ jobs:
       BUNDLE_VAR_git_sha: ${{ github.sha }}
       BUNDLES_JSON: ${{ needs.select-and-check.outputs.bundles }}
       EF_USE_PREBUILT_WHEEL: "true"
+      EF_LAB_PAUSE: ${{ github.event_name == 'workflow_dispatch' && inputs.pause_after_first_capability }}
     steps:
       - name: Checkout exact commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -173,6 +180,23 @@ jobs:
             < /tmp/current-user.json
           databricks version
 
+      - name: Verify Run as authorization
+        run: |
+          databricks service-principals list \
+            --filter "permission eq 'servicePrincipal/use'" --output json \
+            > "$RUNNER_TEMP/run-as-permissions.json"
+          jq . "$RUNNER_TEMP/run-as-permissions.json"
+          if ! jq -e --arg runtime "$BUNDLE_VAR_runtime_sp_client_id" \
+            'if type == "array" then .
+             elif type == "object" and (.Resources | type) == "array"
+             then .Resources
+             else error("Unexpected service principals response") end
+             | any(.[]; .applicationId == $runtime)' \
+            "$RUNNER_TEMP/run-as-permissions.json"; then
+            echo "Caller cannot use the configured Run as runtime; deployment blocked" >&2
+            exit 1
+          fi
+
       - name: Validate and plan affected capabilities
         run: |
           mkdir -p /tmp/dev-deployment
@@ -193,13 +217,27 @@ jobs:
 
       - name: Deploy capabilities first
         run: |
+          capability_count=$(jq '[.[] | select(. != "" and (endswith("/orchestration") | not))] | length' \
+            <<< "$BUNDLES_JSON")
+          if [ "$EF_LAB_PAUSE" = "true" ] && [ "$GITHUB_RUN_ATTEMPT" = "1" ] \
+            && [ "$capability_count" -lt 2 ]; then
+            echo "Lab cancellation requires at least two capabilities in scope" >&2
+            exit 1
+          fi
+          deployed_count=0
           while IFS= read -r bundle_root; do
             [ -z "$bundle_root" ] && continue
             case "$bundle_root" in
               */orchestration) continue ;;
             esac
             (cd "$bundle_root" && databricks bundle deploy --target dev)
-          done < /tmp/affected-bundles.txt
+            deployed_count=$((deployed_count + 1))
+            if [ "$EF_LAB_PAUSE" = "true" ] && [ "$GITHUB_RUN_ATTEMPT" = "1" ] \
+              && [ "$deployed_count" -eq 1 ]; then
+              echo "LAB_PAUSE_AFTER_FIRST_CAPABILITY: $bundle_root deployed; pausing 300 seconds"
+              sleep 300
+            fi
+          done < <(jq -r '.[]' <<< "$BUNDLES_JSON")
 
       - name: Validate, plan, and deploy orchestration last
         run: |

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 WORKFLOW = Path(".github/workflows/deploy-dev.yml")
@@ -45,6 +46,94 @@ def test_concurrent_dev_deployments_are_serialized_without_cancellation():
         "group": "deploy-dev",
         "cancel-in-progress": False,
     }
+
+
+def run_step(name, tmp_path, extra_env, stubs):
+    step = next(step for step in workflow()["jobs"]["deploy-dev"]["steps"] if step["name"] == name)
+    return subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", stubs + "\n" + step["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), **extra_env},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "permissions,expected_code",
+    [
+        ([{"applicationId": "runtime"}], 0),
+        ({"Resources": [{"applicationId": "runtime"}]}, 0),
+        ([{"applicationId": "other"}], 1),
+        ([], 1),
+        ({"unexpected": []}, 1),
+    ],
+)
+def test_run_as_guard_checks_effective_runtime_permission(tmp_path, permissions, expected_code):
+    result = run_step(
+        "Verify Run as authorization",
+        tmp_path,
+        {
+            "BUNDLE_VAR_runtime_sp_client_id": "runtime",
+            "EF_PERMISSION_FIXTURE": json.dumps(permissions),
+        },
+        'databricks() { printf "%s\\n" "$EF_PERMISSION_FIXTURE"; }',
+    )
+    assert result.returncode == expected_code, result.stderr
+
+
+def test_run_as_guard_precedes_plans_and_deployments():
+    names = [step["name"] for step in workflow()["jobs"]["deploy-dev"]["steps"]]
+    assert (
+        names.index("Verify federated caller")
+        < names.index("Verify Run as authorization")
+        < names.index("Validate and plan affected capabilities")
+    )
+    assert names.index("Verify Run as authorization") < names.index("Deploy capabilities first")
+
+
+@pytest.mark.parametrize(
+    "pause,attempt,capabilities,expected_code,expected_pause",
+    [
+        ("false", "1", 2, 0, False),
+        ("true", "1", 2, 0, True),
+        ("true", "2", 2, 0, False),
+        ("true", "1", 1, 1, False),
+    ],
+)
+def test_lab_pause_and_same_sha_recovery(
+    tmp_path, pause, attempt, capabilities, expected_code, expected_pause
+):
+    roots = ["domains/retail/capabilities/clientes"]
+    if capabilities == 2:
+        roots.append("domains/retail/capabilities/productos")
+    roots.append("domains/retail/orchestration")
+    for root in roots:
+        (tmp_path / root).mkdir(parents=True)
+    result = run_step(
+        "Deploy capabilities first",
+        tmp_path,
+        {
+            "BUNDLES_JSON": json.dumps(roots),
+            "EF_LAB_PAUSE": pause,
+            "GITHUB_RUN_ATTEMPT": attempt,
+        },
+        'databricks() { printf "DEPLOY:%s\\n" "${PWD##*/}"; }\n'
+        'sleep() { printf "PAUSE:%s\\n" "$1"; }',
+    )
+    assert result.returncode == expected_code, result.stderr
+    lines = result.stdout.splitlines()
+    assert ("PAUSE:300" in lines) == expected_pause
+    assert "DEPLOY:orchestration" not in lines
+    if expected_code:
+        assert not any(line.startswith("DEPLOY:") for line in lines)
+    else:
+        assert "DEPLOY:clientes" in lines
+        assert "DEPLOY:productos" in lines
+    if expected_pause:
+        assert lines.index("DEPLOY:clientes") < lines.index("PAUSE:300")
+        assert lines.index("PAUSE:300") < lines.index("DEPLOY:productos")
 
 
 def _get_step_run(name: str) -> str:

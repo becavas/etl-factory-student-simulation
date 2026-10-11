@@ -105,4 +105,4 @@ def test_orchestrator_bundle_has_no_artifact_or_platform_resources():
     assert document["bundle"]["name"] == "retail_orchestration"
     assert "artifacts" not in document
     assert "sync" not in document
-    assert set(document["targets"]) == {"sandbox", "dev"}
+    assert set(document["targets"]) == {"sandbox", "dev", "certi", "prod"}

@@ -1,0 +1,423 @@
+name: promote-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Full commit SHA deployed successfully to DEV
+        required: true
+        type: string
+      dev_run_id:
+        description: deploy-dev workflow run ID that produced the release
+        required: true
+        type: string
+      dev_run_attempt:
+        description: Successful deploy-dev run attempt
+        required: true
+        type: string
+      smoke_batch_id:
+        description: Deterministic CERTI batch published by the authorized source actor
+        required: true
+        type: string
+
+concurrency:
+  group: promote-release
+  cancel-in-progress: false
+
+jobs:
+  verify-release:
+    name: verify-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      bundles: ${{ steps.release.outputs.bundles }}
+      wheel_sha256: ${{ steps.release.outputs.wheel_sha256 }}
+    steps:
+      - name: Checkout selected release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Prove release is an ancestor of main
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git fetch origin main
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+
+      - name: Download successful DEV release
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: dev-release-${{ inputs.release_sha }}-${{ inputs.dev_run_attempt }}
+          path: release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.dev_run_id }}
+
+      - name: Verify record and wheel
+        id: release
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          DEV_RUN_ID: ${{ inputs.dev_run_id }}
+          DEV_RUN_ATTEMPT: ${{ inputs.dev_run_attempt }}
+        run: |
+          python scripts/verify_release_candidate.py \
+            --release-dir release \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-sha "$RELEASE_SHA" \
+            --dev-run-id "$DEV_RUN_ID" \
+            --dev-run-attempt "$DEV_RUN_ATTEMPT" \
+            --bundles-output /tmp/release-bundles.txt \
+            > /tmp/release-values.txt
+          bundles=$(jq -Rsc 'split("\n") | map(select(length > 0))' \
+            /tmp/release-bundles.txt)
+          wheel_sha256=$(sed -n 's/^release_wheel_sha256=//p' \
+            /tmp/release-values.txt)
+          test -n "$wheel_sha256"
+          echo "bundles=$bundles" >> "$GITHUB_OUTPUT"
+          echo "wheel_sha256=$wheel_sha256" >> "$GITHUB_OUTPUT"
+
+  deploy-certi:
+    name: deploy-certi-and-smoke
+    needs: verify-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: certi
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: github-oidc
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+      BUNDLE_VAR_runtime_sp_client_id: ${{ vars.DATABRICKS_RUNTIME_SP_CLIENT_ID }}
+      BUNDLE_VAR_operator_group: ${{ vars.DATABRICKS_OPERATOR_GROUP }}
+      BUNDLE_VAR_policy_id: ${{ vars.DATABRICKS_POLICY_ID }}
+      BUNDLE_VAR_node_type_id: ${{ vars.DATABRICKS_NODE_TYPE_ID }}
+      BUNDLE_VAR_git_sha: ${{ inputs.release_sha }}
+      EF_USE_PREBUILT_WHEEL: "true"
+      EF_EXPECTED_WHEEL_SHA256: ${{ needs.verify-release.outputs.wheel_sha256 }}
+      BUNDLES_JSON: ${{ needs.verify-release.outputs.bundles }}
+    steps:
+      - name: Checkout exact release as local main
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Establish branch identity without changing the SHA
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          git checkout -B main "$RELEASE_SHA"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --disable-pip-version-check \
+            build==1.5.0 hatchling==1.32.0
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@903f2679e2ca728decb4a78c74d57570f8e8d2e5 # v1.12.1
+
+      - name: Download approved DEV release
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: dev-release-${{ inputs.release_sha }}-${{ inputs.dev_run_attempt }}
+          path: release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.dev_run_id }}
+
+      - name: Stage and verify the approved wheel
+        run: |
+          mkdir -p dist /tmp/certi-deployment
+          cp release/*.whl dist/
+          python scripts/prepare_bundle_artifact.py
+          test -n "$DATABRICKS_HOST"
+          test -n "$DATABRICKS_CLIENT_ID"
+          test -n "$BUNDLE_VAR_runtime_sp_client_id"
+          test -n "$BUNDLE_VAR_operator_group"
+          test -n "$BUNDLE_VAR_policy_id"
+          test -n "$BUNDLE_VAR_node_type_id"
+          test "$DATABRICKS_CLIENT_ID" != "$BUNDLE_VAR_runtime_sp_client_id"
+          test "$BUNDLE_VAR_runtime_sp_client_id" != "__required_in_shared_target__"
+          test "$BUNDLE_VAR_operator_group" != "__required_in_shared_target__"
+          databricks current-user me --output json > /tmp/certi-current-user.json
+          python scripts/verify_ci_identity.py \
+            --expected-client-id "$DATABRICKS_CLIENT_ID" \
+            < /tmp/certi-current-user.json
+
+      - name: Validate, plan, and deploy CERTI scope
+        run: |
+          jq -r '.[]' <<< "$BUNDLES_JSON" > /tmp/release-bundles.txt
+          while IFS= read -r bundle_root; do
+            case "$bundle_root" in
+              ""|*/orchestration) continue ;;
+            esac
+            key=$(printf '%s' "$bundle_root" | tr '/' '_')
+            (
+              cd "$bundle_root"
+              databricks bundle validate --target certi --output json \
+                > "/tmp/certi-deployment/$key.validate.json"
+              databricks bundle plan --target certi \
+                > "/tmp/certi-deployment/$key.plan.txt"
+            )
+          done < /tmp/release-bundles.txt
+          while IFS= read -r bundle_root; do
+            case "$bundle_root" in
+              ""|*/orchestration) continue ;;
+            esac
+            (cd "$bundle_root" && databricks bundle deploy --target certi)
+          done < /tmp/release-bundles.txt
+          while IFS= read -r bundle_root; do
+            case "$bundle_root" in
+              */orchestration)
+                key=$(printf '%s' "$bundle_root" | tr '/' '_')
+                (
+                  cd "$bundle_root"
+                  databricks bundle validate --target certi --output json \
+                    > "/tmp/certi-deployment/$key.validate.json"
+                  databricks bundle plan --target certi \
+                    > "/tmp/certi-deployment/$key.plan.txt"
+                  databricks bundle deploy --target certi
+                )
+                ;;
+            esac
+          done < /tmp/release-bundles.txt
+
+      - name: Run domain smoke in CERTI
+        env:
+          SMOKE_BATCH_ID: ${{ inputs.smoke_batch_id }}
+        run: |
+          (
+            cd domains/retail/orchestration
+            databricks bundle run \
+              --target certi \
+              --output json \
+              --params batch_id="$SMOKE_BATCH_ID",snapshot_mode=INCREMENTAL,aggregate_mode=INCREMENTAL \
+              retail_domain_e2e_job
+          ) > /tmp/certi-smoke-cli.json
+          smoke_run_id=$(jq -r '.run_id' /tmp/certi-smoke-cli.json)
+          test "$smoke_run_id" != "null"
+          jq -n \
+            --argjson run_id "$smoke_run_id" \
+            --arg batch_id "$SMOKE_BATCH_ID" \
+            '{run_id: $run_id, batch_id: $batch_id, result_state: "SUCCESS"}' \
+            > /tmp/certi-smoke.json
+
+      - name: Capture CERTI deployment record
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          while IFS= read -r bundle_root; do
+            [ -z "$bundle_root" ] && continue
+            key=$(printf '%s' "$bundle_root" | tr '/' '_')
+            (
+              cd "$bundle_root"
+              databricks bundle summary --target certi --output json \
+                > "/tmp/certi-deployment/$key.summary.json"
+            )
+          done < /tmp/release-bundles.txt
+          wheel=$(find dist -maxdepth 1 -name 'enterprise_fabric-*.whl' -type f)
+          python scripts/write_deployment_record.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --sha "$RELEASE_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --target certi \
+            --bundles-file /tmp/release-bundles.txt \
+            --evidence-dir /tmp/certi-deployment \
+            --artifact "$wheel" \
+            --artifact-sha256 "$EF_EXPECTED_WHEEL_SHA256" \
+            --output /tmp/certi-deployment-record.json
+
+      - name: Upload CERTI evidence
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: certi-release-${{ inputs.release_sha }}-${{ github.run_attempt }}
+          path: |
+            /tmp/certi-deployment-record.json
+            /tmp/certi-smoke.json
+            /tmp/certi-deployment/
+          if-no-files-found: error
+          retention-days: 90
+
+  deploy-prod:
+    name: deploy-prod
+    needs:
+      - verify-release
+      - deploy-certi
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: prod
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: github-oidc
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+      BUNDLE_VAR_runtime_sp_client_id: ${{ vars.DATABRICKS_RUNTIME_SP_CLIENT_ID }}
+      BUNDLE_VAR_operator_group: ${{ vars.DATABRICKS_OPERATOR_GROUP }}
+      BUNDLE_VAR_policy_id: ${{ vars.DATABRICKS_POLICY_ID }}
+      BUNDLE_VAR_node_type_id: ${{ vars.DATABRICKS_NODE_TYPE_ID }}
+      BUNDLE_VAR_git_sha: ${{ inputs.release_sha }}
+      EF_USE_PREBUILT_WHEEL: "true"
+      EF_EXPECTED_WHEEL_SHA256: ${{ needs.verify-release.outputs.wheel_sha256 }}
+      BUNDLES_JSON: ${{ needs.verify-release.outputs.bundles }}
+    steps:
+      - name: Checkout exact release as local main
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Establish branch identity without changing the SHA
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          git checkout -B main "$RELEASE_SHA"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --disable-pip-version-check \
+            build==1.5.0 hatchling==1.32.0
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@903f2679e2ca728decb4a78c74d57570f8e8d2e5 # v1.12.1
+
+      - name: Download approved DEV release
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: dev-release-${{ inputs.release_sha }}-${{ inputs.dev_run_attempt }}
+          path: release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.dev_run_id }}
+
+      - name: Stage and verify the approved wheel
+        run: |
+          mkdir -p dist /tmp/prod-deployment
+          cp release/*.whl dist/
+          python scripts/prepare_bundle_artifact.py
+          test -n "$DATABRICKS_HOST"
+          test -n "$DATABRICKS_CLIENT_ID"
+          test -n "$BUNDLE_VAR_runtime_sp_client_id"
+          test -n "$BUNDLE_VAR_operator_group"
+          test -n "$BUNDLE_VAR_policy_id"
+          test -n "$BUNDLE_VAR_node_type_id"
+          test "$DATABRICKS_CLIENT_ID" != "$BUNDLE_VAR_runtime_sp_client_id"
+          test "$BUNDLE_VAR_runtime_sp_client_id" != "__required_in_shared_target__"
+          test "$BUNDLE_VAR_operator_group" != "__required_in_shared_target__"
+          databricks current-user me --output json > /tmp/prod-current-user.json
+          python scripts/verify_ci_identity.py \
+            --expected-client-id "$DATABRICKS_CLIENT_ID" \
+            < /tmp/prod-current-user.json
+
+      - name: Validate, plan, and deploy PROD scope
+        run: |
+          jq -r '.[]' <<< "$BUNDLES_JSON" > /tmp/release-bundles.txt
+          while IFS= read -r bundle_root; do
+            case "$bundle_root" in
+              ""|*/orchestration) continue ;;
+            esac
+            key=$(printf '%s' "$bundle_root" | tr '/' '_')
+            (
+              cd "$bundle_root"
+              databricks bundle validate --target prod --output json \
+                > "/tmp/prod-deployment/$key.validate.json"
+              databricks bundle plan --target prod \
+                > "/tmp/prod-deployment/$key.plan.txt"
+            )
+          done < /tmp/release-bundles.txt
+          while IFS= read -r bundle_root; do
+            case "$bundle_root" in
+              ""|*/orchestration) continue ;;
+            esac
+            (cd "$bundle_root" && databricks bundle deploy --target prod)
+          done < /tmp/release-bundles.txt
+          while IFS= read -r bundle_root; do
+            case "$bundle_root" in
+              */orchestration)
+                key=$(printf '%s' "$bundle_root" | tr '/' '_')
+                (
+                  cd "$bundle_root"
+                  databricks bundle validate --target prod --output json \
+                    > "/tmp/prod-deployment/$key.validate.json"
+                  databricks bundle plan --target prod \
+                    > "/tmp/prod-deployment/$key.plan.txt"
+                  databricks bundle deploy --target prod
+                )
+                ;;
+            esac
+          done < /tmp/release-bundles.txt
+
+      - name: Capture PROD deployment record
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          while IFS= read -r bundle_root; do
+            [ -z "$bundle_root" ] && continue
+            key=$(printf '%s' "$bundle_root" | tr '/' '_')
+            (
+              cd "$bundle_root"
+              databricks bundle summary --target prod --output json \
+                > "/tmp/prod-deployment/$key.summary.json"
+            )
+          done < /tmp/release-bundles.txt
+          wheel=$(find dist -maxdepth 1 -name 'enterprise_fabric-*.whl' -type f)
+          python scripts/write_deployment_record.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --sha "$RELEASE_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --target prod \
+            --bundles-file /tmp/release-bundles.txt \
+            --evidence-dir /tmp/prod-deployment \
+            --artifact "$wheel" \
+            --artifact-sha256 "$EF_EXPECTED_WHEEL_SHA256" \
+            --output /tmp/prod-deployment-record.json
+
+      - name: Download CERTI evidence
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: certi-release-${{ inputs.release_sha }}-${{ github.run_attempt }}
+          path: certi-evidence
+
+      - name: Create final promotion record
+        run: |
+          python scripts/write_promotion_record.py \
+            --dev-record release/deployment-record.json \
+            --certi-record certi-evidence/certi-deployment-record.json \
+            --prod-record /tmp/prod-deployment-record.json \
+            --certi-smoke certi-evidence/certi-smoke.json \
+            --output /tmp/promotion-record.json
+          python -m json.tool /tmp/promotion-record.json
+
+      - name: Upload promoted release evidence
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: promoted-release-${{ inputs.release_sha }}-${{ github.run_attempt }}
+          path: |
+            /tmp/prod-deployment-record.json
+            /tmp/promotion-record.json
+            /tmp/prod-deployment/
+          if-no-files-found: error
+          retention-days: 90

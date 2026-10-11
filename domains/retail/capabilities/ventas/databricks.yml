@@ -65,3 +65,49 @@ targets:
           permissions:
             - service_principal_name: ${var.runtime_sp_client_id}
               level: CAN_MANAGE_RUN
+
+  certi:
+    mode: production
+    git:
+      branch: main
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.runtime_sp_client_id}
+    permissions:
+      - group_name: ${var.operator_group}
+        level: CAN_RUN
+    presets:
+      tags:
+        deployed_commit: ${var.git_sha}
+    variables:
+      catalog: retail_certi
+    resources:
+      jobs:
+        ventas_gold_job:
+          permissions:
+            - service_principal_name: ${var.runtime_sp_client_id}
+              level: CAN_MANAGE_RUN
+
+  prod:
+    mode: production
+    git:
+      branch: main
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.runtime_sp_client_id}
+    permissions:
+      - group_name: ${var.operator_group}
+        level: CAN_RUN
+    presets:
+      tags:
+        deployed_commit: ${var.git_sha}
+    variables:
+      catalog: retail_prod
+    resources:
+      jobs:
+        ventas_gold_job:
+          permissions:
+            - service_principal_name: ${var.runtime_sp_client_id}
+              level: CAN_MANAGE_RUN

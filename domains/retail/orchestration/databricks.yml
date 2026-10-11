@@ -71,3 +71,43 @@ targets:
       clientes_job_name: retail-clientes-e2e
       productos_job_name: retail-productos-e2e
       ventas_job_name: retail-ventas-gold
+
+  certi:
+    mode: production
+    git:
+      branch: main
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.runtime_sp_client_id}
+    permissions:
+      - group_name: ${var.operator_group}
+        level: CAN_RUN
+    presets:
+      tags:
+        deployed_commit: ${var.git_sha}
+    variables:
+      pedidos_job_name: retail-pedidos-e2e
+      clientes_job_name: retail-clientes-e2e
+      productos_job_name: retail-productos-e2e
+      ventas_job_name: retail-ventas-gold
+
+  prod:
+    mode: production
+    git:
+      branch: main
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.runtime_sp_client_id}
+    permissions:
+      - group_name: ${var.operator_group}
+        level: CAN_RUN
+    presets:
+      tags:
+        deployed_commit: ${var.git_sha}
+    variables:
+      pedidos_job_name: retail-pedidos-e2e
+      clientes_job_name: retail-clientes-e2e
+      productos_job_name: retail-productos-e2e
+      ventas_job_name: retail-ventas-gold

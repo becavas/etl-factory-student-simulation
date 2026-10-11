@@ -39,6 +39,44 @@ Este repositorio consume los siguientes recursos. Su aprovisionamiento y lifecyc
 > **Nota sobre permisos Unity Catalog en DEV (Excepción de Laboratorio)**:
 > Por acuerdo para este laboratorio, el runtime SP (`etl-factory-dev-runtime`) dispone de los permisos necesarios otorgados directamente sobre el catálogo `retail_dev` y heredados por sus schemas y Volumes hijos. Esta decisión se conserva como excepción controlada de capacitación y **no representa el estándar de mínimo privilegio estricto por schema y Volume**, el cual se gobernará en fases posteriores (CERTI/PROD).
 
+## CERTI
+
+| Tipo | Nombre lógico | Nombre físico | Garantía requerida | Owner | Estado |
+|---|---|---|---|---|---|
+| Workspace | `certi` | Workspace compartido CERTI | URL oficial y workspace assignment de ambos SPs | Data Platform | Configurado |
+| Deployer SP / WIF | `etl-factory-certi-deployer` | Subject `<repo>:environment:certi` | Autenticación federada OIDC sin secretos en runner | IAM / Data Platform | Configurado |
+| Runtime SP | `etl-factory-certi-runtime` | SP runtime en workspace CERTI | Application ID estable y workspace assignment | IAM / Data Platform | Configurado |
+| SP role | `Service Principal User` | Rol deployer → runtime | Deployer autorizado a configurar Run as del runtime | IAM | Configurado |
+| Catálogo | `retail_certi` | `retail_certi` | Binding exclusivo y schemas `landing`, `bronze`, `silver`, `gold` | Data Platform | Configurado |
+| Volume | `pedidos_source` | `retail_certi.landing.pedidos_source` | `READ VOLUME` en fuentes gobernadas CERTI; dataset smoke | Data Platform | Configurado |
+| Volume | `clientes_source` | `retail_certi.landing.clientes_source` | `READ VOLUME` en fuentes gobernadas CERTI; dataset smoke | Data Platform | Configurado |
+| Volume | `productos_source` | `retail_certi.landing.productos_source` | `READ VOLUME` en fuentes gobernadas CERTI; dataset smoke | Data Platform | Configurado |
+| Compute policy | ID externo | Variable `vars.DATABRICKS_POLICY_ID` | `CAN_USE`, classic job compute, `SINGLE_USER`, node `vars.DATABRICKS_NODE_TYPE_ID` | Data Platform | Configurado |
+| Child Job ACL | Child Job permissions | `CAN_MANAGE_RUN` en child jobs | Runtime puede ejecutar children desde el parent | Bundle configuration | Declarado en YAML |
+| Carpeta Bundle | State compartido | `/Workspace/Shared/.bundle/.../certi` | State separado y escribible por deployer | Data Platform | Configurado |
+| Grupo operador | Operador CERTI | Grupo CERTI | Permisos según segregación | Data Governance | Configurado |
+| GitHub Environment | `certi` | Environment `certi` | Deployment branch restringida a `main` y variables configuradas | Repository admin | Configurado |
+
+## PROD
+
+| Tipo | Nombre lógico | Nombre físico | Garantía requerida | Owner | Estado |
+|---|---|---|---|---|---|
+| Workspace | `prod` | Workspace productivo PROD | URL oficial y workspace assignment de ambos SPs | Data Platform | Configurado |
+| Deployer SP / WIF | `etl-factory-prod-deployer` | Subject `<repo>:environment:prod` | Autenticación federada OIDC sin secretos en runner | IAM / Data Platform | Configurado |
+| Runtime SP | `etl-factory-prod-runtime` | SP runtime en workspace PROD | Application ID estable y workspace assignment | IAM / Data Platform | Configurado |
+| SP role | `Service Principal User` | Rol deployer → runtime | Deployer autorizado a configurar Run as del runtime | IAM | Configurado |
+| Catálogo | `retail_prod` | `retail_prod` | Binding exclusivo y schemas `landing`, `bronze`, `silver`, `gold` | Data Platform | Configurado |
+| Volume | `pedidos_source` | `retail_prod.landing.pedidos_source` | `READ VOLUME` en fuentes gobernadas PROD | Data Platform | Configurado |
+| Volume | `clientes_source` | `retail_prod.landing.clientes_source` | `READ VOLUME` en fuentes gobernadas PROD | Data Platform | Configurado |
+| Volume | `productos_source` | `retail_prod.landing.productos_source` | `READ VOLUME` en fuentes gobernadas PROD | Data Platform | Configurado |
+| Compute policy | ID externo | Variable `vars.DATABRICKS_POLICY_ID` | `CAN_USE`, classic job compute, `SINGLE_USER`, node `vars.DATABRICKS_NODE_TYPE_ID` | Data Platform | Configurado |
+| Child Job ACL | Child Job permissions | `CAN_MANAGE_RUN` en child jobs | Runtime puede ejecutar children desde el parent | Bundle configuration | Declarado en YAML |
+| Carpeta Bundle | State compartido | `/Workspace/Shared/.bundle/.../prod` | State separado y escribible por deployer | Data Platform | Configurado |
+| Grupo operador | Operador PROD | Grupo PROD | Permisos según segregación | Data Governance | Configurado |
+| GitHub Environment | `prod` | Environment `prod` | Deployment branch restringida a `main`, required reviewers y variables configuradas | Repository admin | Configurado |
+
+El runtime PROD recibe grants sobre datos PROD; el deployer PROD no. Ambos pueden requerir `CAN_USE` sobre la policy para configurar/ejecutar el Job según el control de plataforma.
+
 ## Contrato de acceso
 
 - El Data Engineer utiliza identidad personal solo en sandbox.

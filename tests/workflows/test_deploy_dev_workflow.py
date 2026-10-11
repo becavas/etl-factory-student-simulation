@@ -48,10 +48,11 @@ def test_concurrent_dev_deployments_are_serialized_without_cancellation():
     }
 
 
-def run_step(name, tmp_path, extra_env, stubs):
-    step = next(step for step in workflow()["jobs"]["deploy-dev"]["steps"] if step["name"] == name)
+def run_step(name, tmp_path, extra_env, stubs, job_name="deploy-dev"):
+    step = next(step for step in workflow()["jobs"][job_name]["steps"] if step["name"] == name)
+    body = step["run"].replace("/tmp/", str(tmp_path) + "/")
     return subprocess.run(
-        ["bash", "-e", "-o", "pipefail", "-c", stubs + "\n" + step["run"]],
+        ["bash", "-e", "-o", "pipefail", "-c", stubs + "\n" + body],
         cwd=tmp_path,
         env={**os.environ, "RUNNER_TEMP": str(tmp_path), **extra_env},
         capture_output=True,
@@ -134,6 +135,115 @@ def test_lab_pause_and_same_sha_recovery(
     if expected_pause:
         assert lines.index("DEPLOY:clientes") < lines.index("PAUSE:300")
         assert lines.index("PAUSE:300") < lines.index("DEPLOY:productos")
+
+
+def git_at(repo, *args):
+    return subprocess.run(
+        ["git", *args], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def commit_path(repo, relative):
+    path = repo / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("fixture\n", encoding="utf-8")
+    git_at(repo, "add", "--all")
+    git_at(repo, "commit", "-m", "fixture")
+    return git_at(repo, "rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "root",
+        "normal",
+        "merge",
+        "merge-docs",
+        "push-range",
+        "zero-before",
+        "invalid-before",
+        "deleted-path",
+    ],
+)
+def test_changed_paths_on_real_git_history(tmp_path, scenario):
+    git_at(tmp_path, "init", "-b", "main")
+    git_at(tmp_path, "config", "user.name", "Fixture")
+    git_at(tmp_path, "config", "user.email", "fixture@example.invalid")
+    git_at(tmp_path, "config", "commit.gpgsign", "false")
+    git_at(tmp_path, "config", "core.hooksPath", "/dev/null")
+    base = commit_path(tmp_path, "README.md")
+    before = ""
+    clientes = "domains/retail/capabilities/clientes/source.py"
+    productos = "domains/retail/capabilities/productos/source.py"
+    if scenario == "root":
+        current, expected = base, {"README.md"}
+    elif scenario in {"merge", "merge-docs"}:
+        git_at(tmp_path, "switch", "-c", "feature")
+        feature_path = clientes if scenario == "merge" else "docs/notes.md"
+        commit_path(tmp_path, feature_path)
+        git_at(tmp_path, "switch", "main")
+        commit_path(tmp_path, productos)
+        git_at(tmp_path, "merge", "--no-ff", "feature", "-m", "merge fixture")
+        current = git_at(tmp_path, "rev-parse", "HEAD")
+        expected = {feature_path}
+    elif scenario == "push-range":
+        before = base
+        commit_path(tmp_path, clientes)
+        current = commit_path(tmp_path, productos)
+        expected = {clientes, productos}
+    elif scenario == "deleted-path":
+        commit_path(tmp_path, clientes)
+        (tmp_path / clientes).unlink()
+        renamed = "domains/retail/capabilities/clientes/renamed.py"
+        current = commit_path(tmp_path, renamed)
+        expected = {clientes, renamed}
+    else:
+        current, expected = commit_path(tmp_path, clientes), {clientes}
+        if scenario == "zero-before":
+            before = "0" * 40
+        elif scenario == "invalid-before":
+            before = "unavailable-commit"
+    result = run_step(
+        "Determine changed paths",
+        tmp_path,
+        {"BEFORE_SHA": before, "CURRENT_SHA": current},
+        "",
+        job_name="select-and-check",
+    )
+    assert result.returncode == 0, result.stderr
+    assert set((tmp_path / "changed-paths.txt").read_text().splitlines()) == expected
+
+
+@pytest.mark.parametrize(
+    "pause,capabilities,expected_code",
+    [("false", 0, 0), ("true", 0, 1), ("true", 1, 1), ("true", 2, 0)],
+)
+def test_lab_scope_rejects_empty_or_insufficient_selection(
+    tmp_path, pause, capabilities, expected_code
+):
+    roots = [
+        "domains/retail/capabilities/clientes",
+        "domains/retail/capabilities/productos",
+    ][:capabilities]
+    if roots:
+        roots.append("domains/retail/orchestration")
+    (tmp_path / "changed-paths.txt").write_text("fixture\n", encoding="utf-8")
+    result = run_step(
+        "Select affected Bundles",
+        tmp_path,
+        {
+            "EF_LAB_PAUSE": pause,
+            "EF_SCOPE_FIXTURE": "\n".join(roots),
+            "GITHUB_OUTPUT": str(tmp_path / "outputs.txt"),
+        },
+        'python() { printf "%s\\n" "$EF_SCOPE_FIXTURE"; }',
+        job_name="select-and-check",
+    )
+    assert result.returncode == expected_code, result.stderr
+    if expected_code:
+        assert "Lab cancellation requires" in result.stderr
+    elif capabilities == 0:
+        assert "count=0" in (tmp_path / "outputs.txt").read_text()
 
 
 def _get_step_run(name: str) -> str:

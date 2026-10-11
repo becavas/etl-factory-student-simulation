@@ -76,13 +76,19 @@ jobs:
             && git cat-file -e "$BEFORE_SHA^{commit}"; then
             git diff --name-only --no-renames --diff-filter=ACDMRT \
               "$BEFORE_SHA" "$CURRENT_SHA" > /tmp/changed-paths.txt
+          elif git rev-parse --verify "${CURRENT_SHA}^1" > /dev/null 2>&1; then
+            git diff --name-only --no-renames --diff-filter=ACDMRT \
+              "${CURRENT_SHA}^1" "$CURRENT_SHA" > /tmp/changed-paths.txt
           else
-            git diff-tree --root --no-commit-id --name-only -r \
+            git diff-tree --root --no-commit-id --name-only --no-renames \
+              --diff-filter=ACDMRT -r \
               "$CURRENT_SHA" > /tmp/changed-paths.txt
           fi
 
       - name: Select affected Bundles
         id: scope
+        env:
+          EF_LAB_PAUSE: ${{ github.event_name == 'workflow_dispatch' && inputs.pause_after_first_capability }}
         run: |
           python scripts/affected_bundles.py \
             < /tmp/changed-paths.txt \
@@ -90,6 +96,14 @@ jobs:
           bundles=$(jq -Rsc 'split("\n") | map(select(length > 0))' \
             /tmp/affected-bundles.txt)
           count=$(jq 'length' <<< "$bundles")
+          if [ "$EF_LAB_PAUSE" = "true" ]; then
+            capability_count=$(jq '[.[] | select(endswith("/orchestration") | not)] | length' \
+              <<< "$bundles")
+            if [ "$capability_count" -lt 2 ]; then
+              echo "Lab cancellation requires at least two capabilities in scope; manual deployment not started" >&2
+              exit 1
+            fi
+          fi
           echo "bundles=$bundles" >> "$GITHUB_OUTPUT"
           echo "count=$count" >> "$GITHUB_OUTPUT"
           sed 's/^/- /' /tmp/affected-bundles.txt

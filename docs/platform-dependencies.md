@@ -77,6 +77,33 @@ Este repositorio consume los siguientes recursos. Su aprovisionamiento y lifecyc
 
 El runtime PROD recibe grants sobre datos PROD; el deployer PROD no. Ambos pueden requerir `CAN_USE` sobre la policy para configurar/ejecutar el Job según el control de plataforma.
 
+## Contrato de fuente diaria
+
+```text
+Daily source contract
+- Timezone de negocio: America/Lima.
+- Cutoff: 01:30.
+- Schedule del dominio: 02:00.
+- Batch ID: YYYY-MM-DD correspondiente al día del trigger.
+- Los tres productores publican el mismo batch antes del cutoff.
+- Un batch declarado ready es inmutable; una corrección reemplaza el batch completo.
+- Un atraso se escala al owner de la fuente; no se procesa silenciosamente otro día.
+```
+
+Los Volumes continúan organizados por `batch_id=<batch_id>`. No se introduce otra columna o controlador de calendario.
+
+## Dependencias operativas de plataforma
+
+| Dependencia | CERTI | PROD | Garantía |
+|---|---|---|---|
+| notification destination ID | ID corporativo | ID corporativo | no secreto, administrado externamente |
+| system tables | acceso read-only | acceso read-only | `lakeflow`, `billing`, `access` según disponibilidad |
+| SQL warehouse | ID gobernado | consulta solamente cuando esté autorizado | no creado por Bundle |
+| tag ruleset | `*/*/v*` | repositorio | impedir update/delete; creación automatizada aprobada |
+
+El destino puede ser Teams, Slack, PagerDuty o webhook corporativo. Databricks almacena su ID; el repositorio no hospeda el receptor.
+Si se habilita la ruta de email nativo de laboratorio (§8.1), se utiliza `DATABRICKS_NOTIFICATION_EMAIL` en lugar de destination ID.
+
 ## Contrato de acceso
 
 - El Data Engineer utiliza identidad personal solo en sandbox.
@@ -107,3 +134,4 @@ Cuando una dependencia falta o está prohibida, adjuntar:
 - error completo sin tokens;
 - clasificación `MISSING`, `FORBIDDEN` o `ERROR`;
 - canal: #data-platform-soporte.
+

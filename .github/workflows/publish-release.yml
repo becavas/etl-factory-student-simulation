@@ -1,0 +1,143 @@
+name: publish-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Namespaced tag, for example retail/ventas/v1.0.0
+        required: true
+        type: string
+      bundle_root:
+        description: Exact Bundle root included in the promotion scope
+        required: true
+        type: string
+      release_title:
+        description: Concise description shown in the annotated tag and GitHub Release
+        required: true
+        type: string
+      release_sha:
+        description: Full SHA recorded by the successful promotion
+        required: true
+        type: string
+      promotion_run_id:
+        description: promote-release workflow run ID
+        required: true
+        type: string
+      promotion_run_attempt:
+        description: promote-release run attempt
+        required: true
+        type: string
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  verify-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout exact promoted commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Verify commit belongs to main
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git fetch origin main
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+
+      - name: Download exact promotion evidence
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: promoted-release-${{ inputs.release_sha }}-${{ inputs.promotion_run_attempt }}
+          path: promotion
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.promotion_run_id }}
+
+      - name: Verify publication inputs
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          BUNDLE_ROOT: ${{ inputs.bundle_root }}
+          RELEASE_TITLE: ${{ inputs.release_title }}
+        run: |
+          python scripts/verify_release_publication.py \
+            --promotion-record promotion/promotion-record.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-sha "$RELEASE_SHA" \
+            --release-tag "$RELEASE_TAG" \
+            --bundle-root "$BUNDLE_ROOT" \
+            --release-title "$RELEASE_TITLE" \
+            --notes-output /tmp/release-notes.md
+
+  publish-release:
+    needs: verify-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: prod
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout exact promoted commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Download exact promotion evidence
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: promoted-release-${{ inputs.release_sha }}-${{ inputs.promotion_run_attempt }}
+          path: promotion
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.promotion_run_id }}
+
+      - name: Reverify and publish immutable tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          BUNDLE_ROOT: ${{ inputs.bundle_root }}
+          RELEASE_TITLE: ${{ inputs.release_title }}
+        run: |
+          python scripts/verify_release_publication.py \
+            --promotion-record promotion/promotion-record.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-sha "$RELEASE_SHA" \
+            --release-tag "$RELEASE_TAG" \
+            --bundle-root "$BUNDLE_ROOT" \
+            --release-title "$RELEASE_TITLE" \
+            --notes-output /tmp/release-notes.md
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG"
+          tag_status=$?
+          set -e
+          if [ "$tag_status" = "0" ]; then
+            tag_sha=$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG^{}" | awk '{print $1}')
+            if [ -z "$tag_sha" ]; then
+              tag_sha=$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" | awk '{print $1}')
+            fi
+            test "$tag_sha" = "$RELEASE_SHA"
+          else
+            test "$tag_status" = "2"
+            git config user.name github-actions
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git tag -a "$RELEASE_TAG" "$RELEASE_SHA" -m "$RELEASE_TITLE"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
+          gh --version
+          gh release create "$RELEASE_TAG" \
+            promotion/promotion-record.json \
+            --verify-tag \
+            --title "$RELEASE_TAG — $RELEASE_TITLE" \
+            --notes-file /tmp/release-notes.md

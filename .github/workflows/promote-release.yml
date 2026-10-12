@@ -100,6 +100,7 @@ jobs:
       BUNDLE_VAR_operator_group: ${{ vars.DATABRICKS_OPERATOR_GROUP }}
       BUNDLE_VAR_policy_id: ${{ vars.DATABRICKS_POLICY_ID }}
       BUNDLE_VAR_node_type_id: ${{ vars.DATABRICKS_NODE_TYPE_ID }}
+      BUNDLE_VAR_notification_destination_id: ${{ vars.DATABRICKS_NOTIFICATION_DESTINATION_ID }}
       BUNDLE_VAR_git_sha: ${{ inputs.release_sha }}
       EF_USE_PREBUILT_WHEEL: "true"
       EF_EXPECTED_WHEEL_SHA256: ${{ needs.verify-release.outputs.wheel_sha256 }}
@@ -150,6 +151,8 @@ jobs:
           test -n "$BUNDLE_VAR_operator_group"
           test -n "$BUNDLE_VAR_policy_id"
           test -n "$BUNDLE_VAR_node_type_id"
+          test -n "$BUNDLE_VAR_notification_destination_id"
+          test "$BUNDLE_VAR_notification_destination_id" != "__required_in_shared_target__"
           test "$DATABRICKS_CLIENT_ID" != "$BUNDLE_VAR_runtime_sp_client_id"
           test "$BUNDLE_VAR_runtime_sp_client_id" != "__required_in_shared_target__"
           test "$BUNDLE_VAR_operator_group" != "__required_in_shared_target__"
@@ -298,6 +301,7 @@ jobs:
       BUNDLE_VAR_operator_group: ${{ vars.DATABRICKS_OPERATOR_GROUP }}
       BUNDLE_VAR_policy_id: ${{ vars.DATABRICKS_POLICY_ID }}
       BUNDLE_VAR_node_type_id: ${{ vars.DATABRICKS_NODE_TYPE_ID }}
+      BUNDLE_VAR_notification_destination_id: ${{ vars.DATABRICKS_NOTIFICATION_DESTINATION_ID }}
       BUNDLE_VAR_git_sha: ${{ inputs.release_sha }}
       EF_USE_PREBUILT_WHEEL: "true"
       EF_EXPECTED_WHEEL_SHA256: ${{ needs.verify-release.outputs.wheel_sha256 }}
@@ -348,6 +352,8 @@ jobs:
           test -n "$BUNDLE_VAR_operator_group"
           test -n "$BUNDLE_VAR_policy_id"
           test -n "$BUNDLE_VAR_node_type_id"
+          test -n "$BUNDLE_VAR_notification_destination_id"
+          test "$BUNDLE_VAR_notification_destination_id" != "__required_in_shared_target__"
           test "$DATABRICKS_CLIENT_ID" != "$BUNDLE_VAR_runtime_sp_client_id"
           test "$BUNDLE_VAR_runtime_sp_client_id" != "__required_in_shared_target__"
           test "$BUNDLE_VAR_operator_group" != "__required_in_shared_target__"

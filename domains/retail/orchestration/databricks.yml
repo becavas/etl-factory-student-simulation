@@ -12,6 +12,9 @@ variables:
   operator_group:
     description: Grupo operador autorizado en el ambiente compartido.
     default: __required_in_shared_target__
+  notification_destination_id:
+    description: ID no secreto del system destination administrado.
+    default: __required_in_shared_target__
   git_sha:
     description: Commit exacto desplegado por CI/CD.
     default: local-uncommitted
@@ -91,6 +94,36 @@ targets:
       clientes_job_name: retail-clientes-e2e
       productos_job_name: retail-productos-e2e
       ventas_job_name: retail-ventas-gold
+    resources:
+      jobs:
+        retail_domain_e2e_job:
+          permissions:
+            - group_name: ${var.operator_group}
+              level: CAN_MANAGE_RUN
+          schedule:
+            quartz_cron_expression: "0 0 2 * * ?"
+            timezone_id: America/Lima
+            pause_status: PAUSED
+          parameters:
+            - name: batch_id
+              default: "{{job.trigger.time.iso_date}}"
+            - name: snapshot_mode
+              default: INCREMENTAL
+            - name: aggregate_mode
+              default: INCREMENTAL
+          health:
+            rules:
+              - metric: RUN_DURATION_SECONDS
+                op: GREATER_THAN
+                value: 60
+          webhook_notifications:
+            on_failure:
+              - id: ${var.notification_destination_id}
+            on_duration_warning_threshold_exceeded:
+              - id: ${var.notification_destination_id}
+          notification_settings:
+            no_alert_for_skipped_runs: false
+            no_alert_for_canceled_runs: false
 
   prod:
     mode: production
@@ -111,3 +144,33 @@ targets:
       clientes_job_name: retail-clientes-e2e
       productos_job_name: retail-productos-e2e
       ventas_job_name: retail-ventas-gold
+    resources:
+      jobs:
+        retail_domain_e2e_job:
+          permissions:
+            - group_name: ${var.operator_group}
+              level: CAN_MANAGE_RUN
+          schedule:
+            quartz_cron_expression: "0 0 2 * * ?"
+            timezone_id: America/Lima
+            pause_status: PAUSED
+          parameters:
+            - name: batch_id
+              default: "{{job.trigger.time.iso_date}}"
+            - name: snapshot_mode
+              default: INCREMENTAL
+            - name: aggregate_mode
+              default: INCREMENTAL
+          health:
+            rules:
+              - metric: RUN_DURATION_SECONDS
+                op: GREATER_THAN
+                value: 7200
+          webhook_notifications:
+            on_failure:
+              - id: ${var.notification_destination_id}
+            on_duration_warning_threshold_exceeded:
+              - id: ${var.notification_destination_id}
+          notification_settings:
+            no_alert_for_skipped_runs: false
+            no_alert_for_canceled_runs: false

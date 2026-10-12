@@ -142,24 +142,35 @@ def execute_smoke_step(
     bin_dir.mkdir(parents=True, exist_ok=True)
     mock_cli = bin_dir / "databricks"
 
-    script_content = f"""#!/usr/bin/env python3
-import sys, json
+    summary_file = tmp_path / "mock_summary.json"
+    run_file = tmp_path / "mock_run.json"
 
-summary_payload = {json.dumps(summary_data)}
-run_payload = {json.dumps(run_data)}
+    if summary_data is not None:
+        content = summary_data if isinstance(summary_data, str) else json.dumps(summary_data)
+        summary_file.write_text(content, encoding="utf-8")
+    if run_data is not None:
+        content = run_data if isinstance(run_data, str) else json.dumps(run_data)
+        run_file.write_text(content, encoding="utf-8")
+
+    script_content = f"""#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+summary_path = Path({repr(str(summary_file))})
+run_path = Path({repr(str(run_file))})
 run_exit = {run_exit_code}
 
 args = sys.argv[1:]
 if "bundle" in args and "summary" in args:
-    if summary_payload is not None:
-        sys.stdout.write(json.dumps(summary_payload))
+    if summary_path.is_file():
+        sys.stdout.write(summary_path.read_text(encoding="utf-8"))
     sys.exit(0)
 elif "jobs" in args and "run-now" in args:
     if run_exit != 0:
         sys.stderr.write("CLI run-now error\\n")
         sys.exit(run_exit)
-    if run_payload is not None:
-        sys.stdout.write(json.dumps(run_payload))
+    if run_path.is_file():
+        sys.stdout.write(run_path.read_text(encoding="utf-8"))
     sys.exit(0)
 sys.stderr.write(f"Unexpected invocation: {{args}}\\n")
 sys.exit(1)
@@ -195,6 +206,7 @@ def test_smoke_step_succeeds_with_valid_run_metadata(tmp_path):
     run_meta = make_valid_run_metadata()
     res = execute_smoke_step(tmp_path, VALID_SUMMARY, run_meta)
     assert res.returncode == 0, f"STDOUT: {res.stdout}\nSTDERR: {res.stderr}"
+    assert "NameError" not in res.stderr
 
     smoke_file = Path("/tmp/certi-smoke.json")
     assert smoke_file.is_file()
@@ -213,6 +225,8 @@ def test_smoke_step_succeeds_with_valid_run_metadata(tmp_path):
 def test_smoke_step_fails_on_cli_run_now_failure(tmp_path):
     res = execute_smoke_step(tmp_path, VALID_SUMMARY, None, run_exit_code=1)
     assert res.returncode != 0
+    assert "CLI run-now error" in res.stderr
+    assert "NameError" not in res.stderr
     assert not Path("/tmp/certi-smoke.json").exists()
 
 
@@ -220,6 +234,7 @@ def test_smoke_step_fails_when_job_id_missing_in_summary(tmp_path):
     empty_summary = {"resources": {"jobs": {}}}
     res = execute_smoke_step(tmp_path, empty_summary, make_valid_run_metadata())
     assert res.returncode != 0
+    assert "NameError" not in res.stderr
     assert not Path("/tmp/certi-smoke.json").exists()
 
 
@@ -245,6 +260,7 @@ def test_smoke_step_fails_on_failed_task(tmp_path):
     run_meta = make_valid_run_metadata(result_state="FAILED", tasks=tasks_with_failure)
     res = execute_smoke_step(tmp_path, VALID_SUMMARY, run_meta)
     assert res.returncode != 0
+    assert "NameError" not in res.stderr
     assert not Path("/tmp/certi-smoke.json").exists()
 
 
@@ -266,6 +282,7 @@ def test_smoke_step_fails_on_omitted_task(tmp_path):
     run_meta = make_valid_run_metadata(tasks=tasks_missing)
     res = execute_smoke_step(tmp_path, VALID_SUMMARY, run_meta)
     assert res.returncode != 0
+    assert "NameError" not in res.stderr
     assert not Path("/tmp/certi-smoke.json").exists()
 
 
@@ -273,6 +290,8 @@ def test_smoke_step_fails_on_non_terminal_state(tmp_path):
     run_meta = make_valid_run_metadata(life_cycle_state="RUNNING", result_state=None)
     res = execute_smoke_step(tmp_path, VALID_SUMMARY, run_meta)
     assert res.returncode != 0
+    assert "NameError" not in res.stderr
+    assert "Unexpected invocation" not in res.stderr
     assert not Path("/tmp/certi-smoke.json").exists()
 
 
@@ -283,18 +302,21 @@ def test_smoke_step_fails_on_inconsistent_job_or_batch_or_modes(tmp_path):
         tmp_path, VALID_SUMMARY, run_meta_bad_batch, batch_id="smoke_batch_001"
     )
     assert res.returncode != 0
+    assert "NameError" not in res.stderr
     assert not Path("/tmp/certi-smoke.json").exists()
 
     # Inconsistent job_id
     run_meta_bad_job = make_valid_run_metadata(job_id=9999999)
     res = execute_smoke_step(tmp_path, VALID_SUMMARY, run_meta_bad_job)
     assert res.returncode != 0
+    assert "NameError" not in res.stderr
     assert not Path("/tmp/certi-smoke.json").exists()
 
     # Inconsistent snapshot_mode
     run_meta_bad_mode = make_valid_run_metadata(snapshot_mode="FULL")
     res = execute_smoke_step(tmp_path, VALID_SUMMARY, run_meta_bad_mode)
     assert res.returncode != 0
+    assert "NameError" not in res.stderr
     assert not Path("/tmp/certi-smoke.json").exists()
 
 
@@ -303,4 +325,5 @@ def test_smoke_step_fails_on_task_outputs_only_payload(tmp_path):
     task_outputs_only = {"task_outputs": []}
     res = execute_smoke_step(tmp_path, VALID_SUMMARY, task_outputs_only)
     assert res.returncode != 0
+    assert "NameError" not in res.stderr
     assert not Path("/tmp/certi-smoke.json").exists()

@@ -200,20 +200,44 @@ jobs:
         env:
           SMOKE_BATCH_ID: ${{ inputs.smoke_batch_id }}
         run: |
+          set -euo pipefail
           (
             cd domains/retail/orchestration
-            databricks bundle run \
-              --target certi \
-              --output json \
-              --params batch_id="$SMOKE_BATCH_ID",snapshot_mode=INCREMENTAL,aggregate_mode=INCREMENTAL \
-              retail_domain_e2e_job
-          ) > /tmp/certi-smoke-cli.json
-          smoke_run_id=$(jq -r '.run_id' /tmp/certi-smoke-cli.json)
-          test "$smoke_run_id" != "null"
+            databricks bundle summary --target certi --output json
+          ) > /tmp/certi-domain-summary.json
+          smoke_job_id=$(jq -er '
+            .resources.jobs.retail_domain_e2e_job.id | tonumber
+            | select(. > 0 and . == floor)
+          ' /tmp/certi-domain-summary.json)
           jq -n \
-            --argjson run_id "$smoke_run_id" \
+            --argjson job_id "$smoke_job_id" \
             --arg batch_id "$SMOKE_BATCH_ID" \
-            '{run_id: $run_id, batch_id: $batch_id, result_state: "SUCCESS"}' \
+            '{job_id: $job_id, job_parameters: {
+              batch_id: $batch_id,
+              snapshot_mode: "INCREMENTAL",
+              aggregate_mode: "INCREMENTAL"
+            }}' > /tmp/certi-smoke-request.json
+          databricks jobs run-now \
+            --json @/tmp/certi-smoke-request.json \
+            --timeout 1h --output json > /tmp/certi-smoke-run.json
+          jq -e --argjson job_id "$smoke_job_id" --arg batch_id "$SMOKE_BATCH_ID" '
+            (.run_id | type == "number" and . > 0 and . == floor)
+            and .job_id == $job_id
+            and .state.life_cycle_state == "TERMINATED"
+            and .state.result_state == "SUCCESS"
+            and ([.tasks[].task_key] | sort) ==
+                ["run_clientes", "run_pedidos", "run_productos", "run_ventas"]
+            and all(.tasks[]; .state.life_cycle_state == "TERMINATED"
+                             and .state.result_state == "SUCCESS")
+            and any(.job_parameters[]; .name == "batch_id" and .value == $batch_id)
+            and any(.job_parameters[]; .name == "snapshot_mode" and .value == "INCREMENTAL")
+            and any(.job_parameters[]; .name == "aggregate_mode" and .value == "INCREMENTAL")
+          ' /tmp/certi-smoke-run.json
+          jq --arg batch_id "$SMOKE_BATCH_ID" '
+            {run_id, job_id, batch_id: $batch_id,
+             life_cycle_state: .state.life_cycle_state,
+             result_state: .state.result_state, run_page_url}
+          ' /tmp/certi-smoke-run.json \
             > /tmp/certi-smoke.json
 
       - name: Capture CERTI deployment record
@@ -249,6 +273,7 @@ jobs:
           path: |
             /tmp/certi-deployment-record.json
             /tmp/certi-smoke.json
+            /tmp/certi-smoke-run.json
             /tmp/certi-deployment/
           if-no-files-found: error
           retention-days: 90

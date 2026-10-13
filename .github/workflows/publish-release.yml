@@ -40,13 +40,22 @@ jobs:
       contents: read
       actions: read
     steps:
+      - name: Checkout publication controls from the workflow commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: automation
+          persist-credentials: false
+
       - name: Checkout exact promoted commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.release_sha }}
+          path: release
           fetch-depth: 0
 
       - name: Verify commit belongs to main
+        working-directory: release
         env:
           RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
@@ -70,7 +79,8 @@ jobs:
           BUNDLE_ROOT: ${{ inputs.bundle_root }}
           RELEASE_TITLE: ${{ inputs.release_title }}
         run: |
-          python scripts/verify_release_publication.py \
+          test "$(git -C automation rev-parse HEAD)" = "$GITHUB_SHA"
+          python automation/scripts/verify_release_publication.py \
             --promotion-record promotion/promotion-record.json \
             --repository "$GITHUB_REPOSITORY" \
             --release-sha "$RELEASE_SHA" \
@@ -88,10 +98,18 @@ jobs:
       contents: write
       actions: read
     steps:
+      - name: Checkout publication controls from the workflow commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: automation
+          persist-credentials: false
+
       - name: Checkout exact promoted commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.release_sha }}
+          path: release
           fetch-depth: 0
 
       - name: Download exact promotion evidence
@@ -103,6 +121,7 @@ jobs:
           run-id: ${{ inputs.promotion_run_id }}
 
       - name: Reverify and publish immutable tag and release
+        working-directory: release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ inputs.release_sha }}
@@ -110,8 +129,13 @@ jobs:
           BUNDLE_ROOT: ${{ inputs.bundle_root }}
           RELEASE_TITLE: ${{ inputs.release_title }}
         run: |
-          python scripts/verify_release_publication.py \
-            --promotion-record promotion/promotion-record.json \
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(git -C ../automation rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch origin main
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          python ../automation/scripts/verify_release_publication.py \
+            --promotion-record ../promotion/promotion-record.json \
             --repository "$GITHUB_REPOSITORY" \
             --release-sha "$RELEASE_SHA" \
             --release-tag "$RELEASE_TAG" \
@@ -137,7 +161,7 @@ jobs:
           fi
           gh --version
           gh release create "$RELEASE_TAG" \
-            promotion/promotion-record.json \
+            ../promotion/promotion-record.json \
             --verify-tag \
             --title "$RELEASE_TAG — $RELEASE_TITLE" \
             --notes-file /tmp/release-notes.md

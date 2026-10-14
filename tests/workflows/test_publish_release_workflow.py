@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -249,9 +250,9 @@ def make_synthetic_promotion_record(
     status: str = "PROMOTED",
     bundle_scope: list[str] | None = None,
     certi_smoke_status: str = "SUCCESS",
-    dev_run_id: str = "38142299373",
+    dev_run_id: str = "10000000001",
     dev_attempt: str = "1",
-    promo_run_id: str = "38252469573",
+    promo_run_id: str = "20000000001",
     promo_attempt: str = "1",
 ) -> dict:
     """Construye un promotion-record.json sintético portable para pruebas aisladas."""
@@ -270,12 +271,12 @@ def make_synthetic_promotion_record(
             "domains/retail/orchestration",
         ],
         "certi_smoke": {
-            "run_id": 954484275576539,
-            "job_id": 874965929098030,
+            "run_id": 30000000001,
+            "job_id": 40000000001,
             "batch_id": "synthetic_smoke_001",
             "life_cycle_state": "TERMINATED",
             "result_state": certi_smoke_status,
-            "run_page_url": "https://adb-mock.net/#job/874965929098030/run/954484275576539",
+            "run_page_url": "https://adb-mock.net/#job/40000000001/run/30000000001",
         },
         "environments": {
             "dev": {
@@ -454,6 +455,11 @@ def setup_portable_workflow_fixture(tmp_path: Path, record_override: dict | None
     rec_content = json.dumps(record_data, indent=2)
     (promotion / "promotion-record.json").write_text(rec_content, encoding="utf-8")
 
+    # Copia inmutable independiente del record sintético aprobado
+    approved_reference = copy.deepcopy(record_data)
+    approved_ref_file = tmp_path / "approved_promotion_record.json"
+    approved_ref_file.write_text(rec_content, encoding="utf-8")
+
     # Doble estricto de gh que valida flags, notas y record adjunto
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -470,6 +476,7 @@ from pathlib import Path
 args = sys.argv[1:]
 inv_file = Path({repr(str(gh_invocations))})
 state_file = Path({repr(str(releases_state))})
+ref_file = Path({repr(str(approved_ref_file))})
 
 def log_invocation(status, details=""):
     invs = json.loads(inv_file.read_text(encoding="utf-8")) if inv_file.exists() else []
@@ -553,6 +560,48 @@ if len(args) >= 2 and args[0] == "release" and args[1] == "create":
         sys.stderr.write("ERROR: attached record status is not PROMOTED\\n")
         sys.exit(1)
 
+    # Validar coherencia del record adjunto y notas contra la referencia aprobada independiente
+    if ref_file.is_file():
+        try:
+            expected_ref_data = json.loads(ref_file.read_text(encoding="utf-8"))
+        except Exception as exc:
+            log_invocation("ERROR", f"Could not read approved reference: {{exc}}")
+            expected_ref_data = None
+
+        if expected_ref_data is not None:
+            # Contrastar campos del record adjunto
+            for check_key in [
+                "repository", "git_sha", "artifact_sha256", "bundle_scope", "environments"
+            ]:
+                actual_val = rec_data.get(check_key)
+                expected_val = expected_ref_data.get(check_key)
+                if actual_val != expected_val:
+                    err_msg = (
+                        f"Attached record field '{{check_key}}' is incoherent with "
+                        f"approved reference (got {{actual_val}}, expected {{expected_val}})"
+                    )
+                    log_invocation("REJECTED", err_msg)
+                    sys.stderr.write(f"ERROR: {{err_msg}}\\n")
+                    sys.exit(1)
+
+            # Contrastar que las notas reflejan el record aprobado
+            req_note_items = [
+                f"Release: {{tag}}",
+                f"Commit: {{expected_ref_data['git_sha']}}",
+                f"Wheel SHA-256: {{expected_ref_data['artifact_sha256']}}",
+                "Promoted environments:",
+                "Bundle scope:",
+            ]
+            missing_items = [item for item in req_note_items if item not in notes_content]
+            if missing_items:
+                err_msg = (
+                    f"Release notes are incomplete or incoherent; "
+                    f"missing approved markers: {{missing_items}}"
+                )
+                log_invocation("REJECTED", err_msg)
+                sys.stderr.write(f"ERROR: {{err_msg}}\\n")
+                sys.exit(1)
+
     existing = json.loads(state_file.read_text(encoding="utf-8"))
     existing_tags = [r["tag"] for r in existing]
     if tag in existing_tags:
@@ -593,12 +642,21 @@ sys.exit(1)
     env["GITHUB_REPOSITORY"] = "test-org/test-repo"
     env["GH_TOKEN"] = "mock-token"
 
-    return bare, release, automation, promotion, env, gh_invocations, releases_state
+    return (
+        bare,
+        release,
+        automation,
+        promotion,
+        env,
+        gh_invocations,
+        releases_state,
+        approved_reference,
+    )
 
 
 def test_behavior_first_publish_creates_annotated_tag_and_gh_release(tmp_path):
-    bare, release, automation, promotion, env, gh_inv, rel_state = setup_portable_workflow_fixture(
-        tmp_path
+    bare, release, automation, promotion, env, gh_inv, rel_state, approved_record = (
+        setup_portable_workflow_fixture(tmp_path)
     )
     script = publish_step_script()
     res = subprocess.run(
@@ -627,16 +685,54 @@ def test_behavior_first_publish_creates_annotated_tag_and_gh_release(tmp_path):
     # Validar release y argumentos verificados por el doble de gh
     rels = json.loads(rel_state.read_text(encoding="utf-8"))
     assert len(rels) == 1
-    assert rels[0]["tag"] == "retail/ventas/v1.0.0"
-    assert rels[0]["title"] == "retail/ventas/v1.0.0 — Ventas Gold y KPI diario operables"
-    assert "Release: retail/ventas/v1.0.0" in rels[0]["notes"]
-    assert rels[0]["attached_record"]["status"] == "PROMOTED"
-    assert rels[0]["attached_record"]["git_sha"] == env["RELEASE_SHA"]
+    rel = rels[0]
+    assert rel["tag"] == "retail/ventas/v1.0.0"
+    assert rel["title"] == "retail/ventas/v1.0.0 — Ventas Gold y KPI diario operables"
+
+    # Contrastar el record realmente adjunto contra la referencia aprobada independiente
+    attached = rel["attached_record"]
+    assert attached["repository"] == approved_record["repository"], (
+        f"Attached record repository mismatch: "
+        f"{attached.get('repository')} != {approved_record['repository']}"
+    )
+    assert attached["git_sha"] == approved_record["git_sha"], (
+        f"Attached record git_sha mismatch: "
+        f"{attached.get('git_sha')} != {approved_record['git_sha']}"
+    )
+    assert attached["artifact_sha256"] == approved_record["artifact_sha256"], (
+        f"Attached record artifact_sha256 mismatch: "
+        f"{attached.get('artifact_sha256')} != {approved_record['artifact_sha256']}"
+    )
+    assert attached["bundle_scope"] == approved_record["bundle_scope"], (
+        f"Attached record bundle_scope mismatch: "
+        f"{attached.get('bundle_scope')} != {approved_record['bundle_scope']}"
+    )
+    assert attached["environments"] == approved_record["environments"], (
+        f"Attached record environments mismatch: "
+        f"{attached.get('environments')} != {approved_record['environments']}"
+    )
+    assert attached["status"] == "PROMOTED"
+
+    # Contrastar notas recibidas contra la referencia aprobada independiente
+    notes = rel["notes"]
+    assert f"Release: {env['RELEASE_TAG']}" in notes
+    assert f"Description: {env['RELEASE_TITLE']}" in notes
+    assert f"Commit: {approved_record['git_sha']}" in notes
+    assert f"Wheel SHA-256: {approved_record['artifact_sha256']}" in notes
+    assert f"Released unit: {env['BUNDLE_ROOT']}" in notes
+    for env_name, env_info in approved_record["environments"].items():
+        expected_line = (
+            f"- {env_name}: workflow run {env_info['workflow_run_id']} "
+            f"attempt {env_info['workflow_run_attempt']}"
+        )
+        assert expected_line in notes, f"Missing {expected_line} in release notes"
+    for root in approved_record["bundle_scope"]:
+        assert f"- {root}" in notes, f"Missing bundle scope root {root} in release notes"
 
 
 def test_behavior_idempotent_rerun_when_tag_exists_same_sha(tmp_path):
-    bare, release, automation, promotion, env, gh_inv, rel_state = setup_portable_workflow_fixture(
-        tmp_path
+    bare, release, automation, promotion, env, gh_inv, rel_state, approved_record = (
+        setup_portable_workflow_fixture(tmp_path)
     )
     # Pre-crear el tag en origin con user.useConfigOnly=true sin Git global
     subprocess.run(
@@ -681,11 +777,12 @@ def test_behavior_idempotent_rerun_when_tag_exists_same_sha(tmp_path):
     # Release completado
     rels = json.loads(rel_state.read_text(encoding="utf-8"))
     assert len(rels) == 1
+    assert rels[0]["attached_record"]["git_sha"] == approved_record["git_sha"]
 
 
 def test_behavior_tag_on_different_sha_rejected_before_publish(tmp_path):
-    bare, release, automation, promotion, env, gh_inv, rel_state = setup_portable_workflow_fixture(
-        tmp_path
+    bare, release, automation, promotion, env, gh_inv, rel_state, _ = (
+        setup_portable_workflow_fixture(tmp_path)
     )
     # Pre-crear tag en origin apuntando a otro commit (automation_sha)
     subprocess.run(
@@ -703,6 +800,11 @@ def test_behavior_tag_on_different_sha_rejected_before_publish(tmp_path):
         check=True,
         env=env,
     )
+    orig_tag_object = subprocess.check_output(
+        ["git", "--git-dir", str(bare), "rev-parse", "refs/tags/retail/ventas/v1.0.0"],
+        text=True,
+        env=env,
+    ).strip()
     orig_tag_sha = subprocess.check_output(
         ["git", "--git-dir", str(bare), "rev-parse", "refs/tags/retail/ventas/v1.0.0^{}"],
         text=True,
@@ -719,22 +821,45 @@ def test_behavior_tag_on_different_sha_rejected_before_publish(tmp_path):
     )
     assert res.returncode != 0, "Conflicting tag must cause script failure"
 
-    # Verificar que el tag remoto NO fue sobrescrito
+    # Verificar que el tag remoto NO fue sobrescrito:
+    # 1. Objeto tag antes y después
+    after_tag_object = subprocess.check_output(
+        ["git", "--git-dir", str(bare), "rev-parse", "refs/tags/retail/ventas/v1.0.0"],
+        text=True,
+        env=env,
+    ).strip()
+    assert after_tag_object == orig_tag_object, "Tag object must remain unchanged"
+
+    # 2. Commit al que apunta el tag antes y después
     after_tag_sha = subprocess.check_output(
         ["git", "--git-dir", str(bare), "rev-parse", "refs/tags/retail/ventas/v1.0.0^{}"],
         text=True,
         env=env,
     ).strip()
-    assert after_tag_sha == orig_tag_sha
+    assert after_tag_sha == orig_tag_sha, "Peeled commit target must remain unchanged"
 
-    # Verificar que no se creó ningún release
+    # 3. Ausencia de toda invocación de publicación gh release create
+    invocations = json.loads(gh_inv.read_text(encoding="utf-8"))
+    release_create_invocations = [
+        inv
+        for inv in invocations
+        if len(inv.get("args", [])) >= 2
+        and inv["args"][0] == "release"
+        and inv["args"][1] == "create"
+    ]
+    assert len(release_create_invocations) == 0, (
+        f"Conflicting tag must prevent any gh release create invocation, "
+        f"but found: {release_create_invocations}"
+    )
+
+    # 4. Estado de releases en gh_releases.json debe permanecer vacío
     rels = json.loads(rel_state.read_text(encoding="utf-8"))
     assert len(rels) == 0
 
 
 def test_behavior_invalid_namespace_rejected_before_tag_creation(tmp_path):
-    bare, release, automation, promotion, env, gh_inv, rel_state = setup_portable_workflow_fixture(
-        tmp_path
+    bare, release, automation, promotion, env, gh_inv, rel_state, _ = (
+        setup_portable_workflow_fixture(tmp_path)
     )
     env["RELEASE_TAG"] = "retail/pedidos/v1.0.0"  # Desalineado con BUNDLE_ROOT = retail/ventas
     script = publish_step_script()
@@ -760,8 +885,8 @@ def test_behavior_invalid_namespace_rejected_before_tag_creation(tmp_path):
 
 
 def test_behavior_unpromoted_record_rejected_before_tag_creation(tmp_path):
-    bare, release, automation, promotion, env, gh_inv, rel_state = setup_portable_workflow_fixture(
-        tmp_path
+    bare, release, automation, promotion, env, gh_inv, rel_state, _ = (
+        setup_portable_workflow_fixture(tmp_path)
     )
     # Modificar el record para tener status FAILED
     rec_path = promotion / "promotion-record.json"
@@ -790,8 +915,8 @@ def test_behavior_unpromoted_record_rejected_before_tag_creation(tmp_path):
 
 
 def test_behavior_duplicate_release_creation_fails_without_altering_tag(tmp_path):
-    bare, release, automation, promotion, env, gh_inv, rel_state = setup_portable_workflow_fixture(
-        tmp_path
+    bare, release, automation, promotion, env, gh_inv, rel_state, _ = (
+        setup_portable_workflow_fixture(tmp_path)
     )
     script = publish_step_script()
     # Primera ejecución exitosa
@@ -832,9 +957,9 @@ def test_behavior_duplicate_release_creation_fails_without_altering_tag(tmp_path
 
 
 def test_behavior_mutation_omitting_tag_push_fails(tmp_path):
-    """Demuestra que omitir git push del script YAML hace fallar la comprobación de tag remoto."""
-    bare, release, automation, promotion, env, gh_inv, rel_state = setup_portable_workflow_fixture(
-        tmp_path
+    """Demuestra que omitir git push del script YAML deja origin sin el tag de release."""
+    bare, release, automation, promotion, env, gh_inv, rel_state, _ = (
+        setup_portable_workflow_fixture(tmp_path)
     )
     script = publish_step_script()
     tampered_script = script.replace('git push origin "refs/tags/$RELEASE_TAG"', ":")
@@ -856,8 +981,8 @@ def test_behavior_mutation_omitting_tag_push_fails(tmp_path):
 
 def test_behavior_mutation_omitting_attached_record_fails(tmp_path):
     """Demuestra que omitir el promotion-record.json en gh release create hace fallar el paso."""
-    bare, release, automation, promotion, env, gh_inv, rel_state = setup_portable_workflow_fixture(
-        tmp_path
+    bare, release, automation, promotion, env, gh_inv, rel_state, _ = (
+        setup_portable_workflow_fixture(tmp_path)
     )
     script = publish_step_script()
     lines = script.splitlines()
@@ -879,8 +1004,8 @@ def test_behavior_mutation_omitting_attached_record_fails(tmp_path):
 
 def test_behavior_mutation_omitting_notes_file_fails(tmp_path):
     """Demuestra que omitir --notes-file en gh release create hace fallar el paso."""
-    bare, release, automation, promotion, env, gh_inv, rel_state = setup_portable_workflow_fixture(
-        tmp_path
+    bare, release, automation, promotion, env, gh_inv, rel_state, _ = (
+        setup_portable_workflow_fixture(tmp_path)
     )
     script = publish_step_script()
     tampered_lines = [line for line in script.splitlines() if "--notes-file" not in line]
@@ -897,3 +1022,55 @@ def test_behavior_mutation_omitting_notes_file_fails(tmp_path):
     )
     assert res.returncode != 0, "Omission of --notes-file must cause failure"
     assert "requires --notes-file" in (res.stdout + res.stderr)
+
+
+def test_behavior_mutation_tampered_notes_single_line_fails(tmp_path):
+    """Demuestra que sustituir notas por una única línea hace fallar la publicación."""
+    bare, release, automation, promotion, env, gh_inv, rel_state, _ = (
+        setup_portable_workflow_fixture(tmp_path)
+    )
+    script = publish_step_script()
+    tamper_line = 'echo "Release: $RELEASE_TAG" > /tmp/release-notes.md\n'
+    tampered_script = script.replace("gh release create", tamper_line + "gh release create")
+
+    res = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", tampered_script],
+        cwd=release,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0, "Tampered single-line notes must cause failure"
+    assert "missing approved markers" in (res.stdout + res.stderr)
+    rels = json.loads(rel_state.read_text(encoding="utf-8"))
+    assert len(rels) == 0, "No release must be created when notes are incomplete"
+
+
+def test_behavior_mutation_tampered_attached_record_fails(tmp_path):
+    """Demuestra que alterar el record adjunto antes de publicar hace fallar la publicación."""
+    bare, release, automation, promotion, env, gh_inv, rel_state, _ = (
+        setup_portable_workflow_fixture(tmp_path)
+    )
+    script = publish_step_script()
+    tamper_cmd = (
+        'python3 -c "'
+        "import json; p = '../promotion/promotion-record.json'; "
+        "d = json.load(open(p)); "
+        "d['artifact_sha256'] = '0' * 64; "
+        "d['bundle_scope'] = ['domains/retail/capabilities/pedidos']; "
+        "d['environments']['prod']['workflow_run_id'] = '9999'; "
+        'json.dump(d, open(p, \\"w\\"))"\n'
+    )
+    tampered_script = script.replace("gh release create", tamper_cmd + "gh release create")
+
+    res = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", tampered_script],
+        cwd=release,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0, "Tampered attached record must cause failure"
+    assert "incoherent with approved reference" in (res.stdout + res.stderr)
+    rels = json.loads(rel_state.read_text(encoding="utf-8"))
+    assert len(rels) == 0, "No release must be created when attached record is incoherent"

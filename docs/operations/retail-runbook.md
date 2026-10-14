@@ -228,6 +228,6 @@ La restauración de tablas Delta, Time Travel, backups físicos o Point-in-Time 
   3. Cero reglas de calidad con acción `FAIL`.
   4. Bitácora de incidente completada con causa raíz, cronología, run IDs y lecciones aprendidas.
 - **Evidencia y Retención**:
-  - Salidas JSON y diagnósticos conservados en la bitácora de auditoría de la sesión (`etl-factory-course-audit`).
-  - Registros de workflow en GitHub Actions: retención estándar de 90 días verificada.
-  - Registros y logs en Databricks: retención formal de system tables y clusters marcada como **pendiente de verificación/acreditación documental**.
+  - Salidas JSON y diagnósticos conservados en la bitácora de auditoría de la sesión (`etl-factory-course-audit/sesion-4`).
+  - Registros de workflow y artifacts en GitHub Actions: La retención efectiva para este repositorio específico permanece **pendiente de acreditación/verificación documental** (el valor nominal por defecto de hasta 90 días no sustituye la inspección de la configuración efectiva o volcado de API de la organización/cuenta).
+  - Registros y logs en Databricks: La política formal de retención de system tables (ej. 365 días) y logs de compute permanece igualmente **pendiente de verificación/acreditación documental**.

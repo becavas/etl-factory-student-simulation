@@ -118,8 +118,8 @@ La ruta operativa elegida para esta instalación es **Slack personal**. El propi
 
 - **Observabilidad de Plataforma**: El 13 de octubre de 2026, Codex comprobó lectura exitosa sobre 7 system tables (`system.lakeflow.jobs`, `job_run_timeline`, `billing.usage`, `billing.list_prices`, `access.audit`, `access.table_lineage`, `information_schema.tables`) utilizando el warehouse CERTI `e637b60e6f465fde` con la identidad humana `bcastillo@techdic.onmicrosoft.com` (`certi-platform`). El warehouse fue apagado a `STOPPED` tras la verificación. Este acceso corresponde al administrador humano comprobado; no está concedido a runtime SPs ni a evaluadores externos.
 - **Retención de Evidencia**:
-  - GitHub Actions: 90 días de retención estándar verificada para logs de ejecución de workflows.
-  - Databricks system tables / compute logs: Política formal de retención (ej. 365 días) marcada como **pendiente de verificación/acreditación documental**.
+  - GitHub Actions: La configuración efectiva de retención de workflows y artifacts para este repositorio específico permanece **pendiente de acreditación/verificación documental**; el valor nominal por defecto de hasta 90 días no sustituye la evidencia de configuración efectiva.
+  - Databricks system tables / compute logs: Política formal de retención (ej. 365 días) permanece marcada como **pendiente de verificación/acreditación documental**.
 
 ## Configuración local de verificación
 

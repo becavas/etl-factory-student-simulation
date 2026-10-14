@@ -106,12 +106,20 @@ Los Volumes continúan organizados por `batch_id=<batch_id>`. No se introduce ot
 
 La ruta operativa elegida para esta instalación es **Slack personal**. El propietario del laboratorio opera el canal privado `etl-factory-alertas` en su workspace ADRs y la app ETL Factory Lab Alerts. Gmail sirve únicamente para identificar al propietario de Slack; no recibe las alertas. Teams es una adaptación corporativa opcional del curso. `DATABRICKS_NOTIFICATION_DESTINATION_ID` se custodia en cada GitHub Environment; el repositorio no hospeda el receptor ni contiene webhooks.
 
-## Operador y Contrato de Acceso
+## Operador, Responsabilidades y Contrato de Acceso
 
-- **Operador Real del Laboratorio**: El alumno y propietario del laboratorio (`becavas`) actúa como operador autorizado.
+- **Propietario del Laboratorio y Administrador Responsable**: El alumno y propietario (`becavas`, identidad humana `bcastillo@techdic.onmicrosoft.com`) es el administrador responsable de la plataforma del laboratorio, autoriza las operaciones y mantiene los recursos.
+- **Asistente de Plataforma y Autor de la Guía**: Codex mantiene la guía oficial y asiste en especificaciones y cambios técnicos autorizados. Codex **no es el owner administrativo ni una persona de guardia**.
 - **Segregación de Funciones en Laboratorio**: Para la revisión de Pull Requests y la aprobación obligatoria del GitHub Environment `prod` se utiliza la cuenta `becavas83`. Se documenta formalmente que **una persona operando dos cuentas representa una emulación técnica y no demuestra segregación humana real ni mínimo privilegio estricto**.
 - Canales corporativos no acreditados (ej. `#data-platform-soporte`), guardias de operaciones rotativas y comités de gobernanza corporativos quedan marcados como **pendientes de acreditación corporativa externa**.
-- El Data Engineer utiliza identidad personal exclusivamente en sandbox; DEV, CERTI y PROD operan mediante identidades automatizadas segregadas (deployer y runtime SPs).
+- El Data Engineer utiliza identidad personal exclusivamente en sandbox; DEV, CERTI y PROD operan mediante identidades automatizadas segregadas (deployer y runtime SPs). Acciones operativas de repair son ejecutadas por el operador autorizado vía OAuth con permisos `CAN_MANAGE_RUN`, procesando bajo el runtime SP del ambiente.
+
+## Observabilidad y Retención Verificada
+
+- **Observabilidad de Plataforma**: El 13 de octubre de 2026, Codex comprobó lectura exitosa sobre 7 system tables (`system.lakeflow.jobs`, `job_run_timeline`, `billing.usage`, `billing.list_prices`, `access.audit`, `access.table_lineage`, `information_schema.tables`) utilizando el warehouse CERTI `e637b60e6f465fde` con la identidad humana `bcastillo@techdic.onmicrosoft.com` (`certi-platform`). El warehouse fue apagado a `STOPPED` tras la verificación. Este acceso corresponde al administrador humano comprobado; no está concedido a runtime SPs ni a evaluadores externos.
+- **Retención de Evidencia**:
+  - GitHub Actions: 90 días de retención estándar verificada para logs de ejecución de workflows.
+  - Databricks system tables / compute logs: Política formal de retención (ej. 365 días) marcada como **pendiente de verificación/acreditación documental**.
 
 ## Configuración local de verificación
 
@@ -119,7 +127,7 @@ La ruta operativa elegida para esta instalación es **Slack personal**. El propi
 export EF_CATALOG="<catalogo_asignado>"
 export EF_POLICY_ID="<policy-id-aprobado>"
 export EF_PLATFORM_OWNER="Propietario del Laboratorio (becavas)"
-export EF_OPERATOR_PROFILE="certi-platform"
+export EF_OPERATOR_PROFILE="certi-platform" # En CERTI; usar perfil correspondiente en PROD
 ```
 
 Estos valores no son secretos. Los identificadores específicos de infraestructura se administran fuera de Git.
@@ -134,5 +142,6 @@ Cuando una dependencia falte o esté bloqueada, adjuntar:
 - comando read-only ejecutado;
 - error completo sin tokens ni secretos;
 - clasificación `MISSING`, `FORBIDDEN` o `ERROR`;
-- canal: escalamiento directo al Administrador de Plataforma (Codex).
+- canal: escalamiento al **Propietario del Laboratorio** (`becavas`) para autorizaciones y ejecución administrativa; contraste y consultas de especificación técnica con **Codex**.
+
 

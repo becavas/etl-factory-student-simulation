@@ -35,6 +35,17 @@ def test_shared_change_selects_capabilities_and_orchestration():
     assert affected_bundles([".github/workflows/pull-request.yml"]) == ALL_BUNDLES
 
 
+def test_shared_release_delivery_controls_select_all_bundles():
+    for path in (
+        ".github/workflows/promote-release.yml",
+        ".github/workflows/publish-release.yml",
+        "scripts/verify_release_candidate.py",
+        "scripts/verify_release_publication.py",
+        "scripts/write_promotion_record.py",
+    ):
+        assert affected_bundles([path]) == ALL_BUNDLES
+
+
 def test_shared_generator_change_selects_every_capability():
     assert affected_bundles(["tools/bundle_generator/generator.py"]) == ALL_BUNDLES
 

@@ -86,52 +86,62 @@ Daily source contract
 - Schedule del dominio: 02:00.
 - Batch ID: YYYY-MM-DD correspondiente al día del trigger.
 - Los tres productores publican el mismo batch antes del cutoff.
-- Un batch declarado ready es inmutable; una corrección reemplaza el batch completo.
+- Un batch declarado ready es inmutable; una corrección se publica como batch sucesor
+  y se documenta su relación con la entrega anterior.
 - Un atraso se escala al owner de la fuente; no se procesa silenciosamente otro día.
 ```
 
 Los Volumes continúan organizados por `batch_id=<batch_id>`. No se introduce otra columna o controlador de calendario.
 
+> **Excepción acotada de laboratorio en CERTI**: Los fixtures negativos CERTI de §§21.1–21.2 disponen de una excepción explícita de laboratorio: el owner de la fuente autoriza la republicación controlada del mismo batch únicamente después de demostrar y capturar el fallo previsto en CERTI, conservando ambos manifests (fallido y corregido) antes de la reparación operativa. Esta excepción no altera el contrato diario PROD ni la inmutabilidad de la evaluación final de Fase 15.
+
 ## Dependencias operativas de plataforma
 
 | Dependencia | CERTI | PROD | Garantía |
 |---|---|---|---|
-| notification destination ID | ID corporativo | ID corporativo | no secreto, administrado externamente |
+| ruta de notificación | ID Slack del laboratorio (canal privado `etl-factory-alertas`) | ID Slack del laboratorio (canal privado `etl-factory-alertas`) | Webhook independiente por ambiente custodiado en Slack y Databricks; destination ID no secreto |
 | system tables | acceso read-only | acceso read-only | `lakeflow`, `billing`, `access` según disponibilidad |
 | SQL warehouse | ID gobernado | consulta solamente cuando esté autorizado | no creado por Bundle |
 | tag ruleset | `*/*/v*` | repositorio | impedir update/delete; creación automatizada aprobada |
 
-El destino puede ser Teams, Slack, PagerDuty o webhook corporativo. Databricks almacena su ID; el repositorio no hospeda el receptor.
-Si se habilita la ruta de email nativo de laboratorio (§8.1), se utiliza `DATABRICKS_NOTIFICATION_EMAIL` en lugar de destination ID.
+La ruta operativa elegida para esta instalación es **Slack personal**. El propietario del laboratorio opera el canal privado `etl-factory-alertas` en su workspace ADRs y la app ETL Factory Lab Alerts. Gmail sirve únicamente para identificar al propietario de Slack; no recibe las alertas. Teams es una adaptación corporativa opcional del curso. `DATABRICKS_NOTIFICATION_DESTINATION_ID` se custodia en cada GitHub Environment; el repositorio no hospeda el receptor ni contiene webhooks.
 
-## Contrato de acceso
+## Operador, Responsabilidades y Contrato de Acceso
 
-- El Data Engineer utiliza identidad personal solo en sandbox.
-- Los grants duraderos se asignan a grupos, no directamente a personas.
-- DEV, CERTI y PROD utilizan identidades automatizadas.
-- Los catálogos de ambientes se aíslan mediante grants y bindings administrados por plataforma.
+- **Propietario del Laboratorio y Administrador Responsable**: El alumno y propietario (`becavas`, identidad humana `bcastillo@techdic.onmicrosoft.com`) es el administrador responsable de la plataforma del laboratorio, autoriza las operaciones y mantiene los recursos.
+- **Asistente de Plataforma y Autor de la Guía**: Codex mantiene la guía oficial y asiste en especificaciones y cambios técnicos autorizados. Codex **no es el owner administrativo ni una persona de guardia**.
+- **Segregación de Funciones en Laboratorio**: Para la revisión de Pull Requests y la aprobación obligatoria del GitHub Environment `prod` se utiliza la cuenta `becavas83`. Se documenta formalmente que **una persona operando dos cuentas representa una emulación técnica y no demuestra segregación humana real ni mínimo privilegio estricto**.
+- Canales corporativos no acreditados (ej. `#data-platform-soporte`), guardias de operaciones rotativas y comités de gobernanza corporativos quedan marcados como **pendientes de acreditación corporativa externa**.
+- El Data Engineer utiliza identidad personal exclusivamente en sandbox; DEV, CERTI y PROD operan mediante identidades automatizadas segregadas (deployer y runtime SPs). Acciones operativas de repair son ejecutadas por el operador autorizado vía OAuth con permisos `CAN_MANAGE_RUN`, procesando bajo el runtime SP del ambiente.
+
+## Observabilidad y Retención Verificada
+
+- **Observabilidad de Plataforma**: El 13 de octubre de 2026, Codex comprobó lectura exitosa sobre 7 system tables (`system.lakeflow.jobs`, `job_run_timeline`, `billing.usage`, `billing.list_prices`, `access.audit`, `access.table_lineage`, `information_schema.tables`) utilizando el warehouse CERTI `e637b60e6f465fde` con la identidad humana `bcastillo@techdic.onmicrosoft.com` (`certi-platform`). El warehouse fue apagado a `STOPPED` tras la verificación. Este acceso corresponde al administrador humano comprobado; no está concedido a runtime SPs ni a evaluadores externos.
+- **Retención de Evidencia**:
+  - GitHub Actions: La configuración efectiva de retención de workflows y artifacts para este repositorio específico permanece **pendiente de acreditación/verificación documental**; el valor nominal por defecto de hasta 90 días no sustituye la evidencia de configuración efectiva.
+  - Databricks system tables / compute logs: Política formal de retención (ej. 365 días) permanece marcada como **pendiente de verificación/acreditación documental**.
 
 ## Configuración local de verificación
 
 ```bash
 export EF_CATALOG="<catalogo_asignado>"
-# Sustituye el marcador por el nombre exacto de tu ficha antes de continuar.
 export EF_POLICY_ID="<policy-id-aprobado>"
-export EF_PLATFORM_OWNER="Data Platform"
-export EF_PLATFORM_SUPPORT_CHANNEL="#data-platform-soporte"
+export EF_PLATFORM_OWNER="Propietario del Laboratorio (becavas)"
+export EF_OPERATOR_PROFILE="certi-platform" # En CERTI; usar perfil correspondiente en PROD
 ```
 
-Estos valores no son secretos, pero los identificadores específicos del workspace se mantienen fuera de Git. El repositorio versiona nombres lógicos y garantías.
+Estos valores no son secretos. Los identificadores específicos de infraestructura se administran fuera de Git.
 
 ## Escalamiento
 
-Cuando una dependencia falta o está prohibida, adjuntar:
+Cuando una dependencia falte o esté bloqueada, adjuntar:
 
 - workspace y profile utilizados;
 - identidad devuelta por `current-user me`;
 - recurso lógico y físico;
 - comando read-only ejecutado;
-- error completo sin tokens;
+- error completo sin tokens ni secretos;
 - clasificación `MISSING`, `FORBIDDEN` o `ERROR`;
-- canal: #data-platform-soporte.
+- canal: escalamiento al **Propietario del Laboratorio** (`becavas`) para autorizaciones y ejecución administrativa; contraste y consultas de especificación técnica con **Codex**.
+
 

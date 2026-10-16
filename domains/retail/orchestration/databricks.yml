@@ -153,7 +153,7 @@ targets:
           schedule:
             quartz_cron_expression: "0 0 2 * * ?"
             timezone_id: America/Lima
-            pause_status: UNPAUSED
+            pause_status: PAUSED
           parameters:
             - name: batch_id
               default: "{{job.trigger.time.iso_date}}"

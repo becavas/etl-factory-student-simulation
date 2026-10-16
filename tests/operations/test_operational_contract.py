@@ -25,8 +25,8 @@ def load(path: Path) -> dict:
 
 def assert_schedule_contract(path: Path = ORCHESTRATION) -> None:
     document = load(path)
-    # Para la activación programada (§22), PROD pasa a UNPAUSED mientras CERTI permanece en PAUSED.
-    for target, state in (("certi", "PAUSED"), ("prod", "UNPAUSED")):
+    # En estado pausado (§23.1), ambos targets permanecen en PAUSED.
+    for target, state in (("certi", "PAUSED"), ("prod", "PAUSED")):
         job = document["targets"][target]["resources"]["jobs"]["retail_domain_e2e_job"]
         actual_tz = job["schedule"].get("timezone_id")
         assert job["schedule"]["timezone_id"] == "America/Lima", (

@@ -352,7 +352,10 @@ def evaluate_deploy_prod_condition(doc, input_val: str | None) -> bool:
     dispatch = (doc.get("on") or doc[True])["workflow_dispatch"]
     default_val = dispatch["inputs"]["deployment_goal"]["default"]
     effective_input = input_val if input_val is not None else default_val
-    return cond.strip() == "${{ inputs.deployment_goal == 'certi_and_prod' }}" and effective_input == "certi_and_prod"
+    return (
+        cond.strip() == "${{ inputs.deployment_goal == 'certi_and_prod' }}"
+        and effective_input == "certi_and_prod"
+    )
 
 
 def test_deploy_prod_job_condition_evaluation():
@@ -378,4 +381,3 @@ def test_mutation_omitting_deploy_prod_condition_fails():
     del doc["jobs"]["deploy-prod"]["if"]
     # Unconditioned job enables prod even for certi_only, which violates isolation
     assert evaluate_deploy_prod_condition(doc, "certi_only") is True
-

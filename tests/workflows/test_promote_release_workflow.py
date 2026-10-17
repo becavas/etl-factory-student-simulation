@@ -327,3 +327,55 @@ def test_smoke_step_fails_on_task_outputs_only_payload(tmp_path):
     assert res.returncode != 0
     assert "NameError" not in res.stderr
     assert not Path("/tmp/certi-smoke.json").exists()
+
+
+# --- Tests for deployment_goal and isolated CERTI rollback (§19.1 & §41) ---
+
+
+def test_deployment_goal_input_contract():
+    doc = workflow()
+    dispatch = (doc.get("on") or doc[True])["workflow_dispatch"]
+    inputs = dispatch["inputs"]
+    assert "deployment_goal" in inputs
+    goal = inputs["deployment_goal"]
+    assert goal["type"] == "choice"
+    assert goal["required"] is True
+    assert goal["default"] == "certi_only"
+    assert goal["options"] == ["certi_only", "certi_and_prod"]
+
+
+def evaluate_deploy_prod_condition(doc, input_val: str | None) -> bool:
+    job = doc["jobs"]["deploy-prod"]
+    cond = job.get("if")
+    if not cond:
+        return True
+    dispatch = (doc.get("on") or doc[True])["workflow_dispatch"]
+    default_val = dispatch["inputs"]["deployment_goal"]["default"]
+    effective_input = input_val if input_val is not None else default_val
+    return cond.strip() == "${{ inputs.deployment_goal == 'certi_and_prod' }}" and effective_input == "certi_and_prod"
+
+
+def test_deploy_prod_job_condition_evaluation():
+    doc = workflow()
+    job = doc["jobs"]["deploy-prod"]
+    assert "if" in job
+    assert job["if"] == "${{ inputs.deployment_goal == 'certi_and_prod' }}"
+
+    # Explicit certi_and_prod enables prod
+    assert evaluate_deploy_prod_condition(doc, "certi_and_prod") is True
+    # Default (omitted input) defaults to certi_only and disables prod
+    assert evaluate_deploy_prod_condition(doc, None) is False
+    # Explicit certi_only disables prod
+    assert evaluate_deploy_prod_condition(doc, "certi_only") is False
+    # Invalid / disallowed input disables prod
+    assert evaluate_deploy_prod_condition(doc, "prod") is False
+    assert evaluate_deploy_prod_condition(doc, "") is False
+
+
+def test_mutation_omitting_deploy_prod_condition_fails():
+    doc = workflow()
+    # Mutate by removing condition
+    del doc["jobs"]["deploy-prod"]["if"]
+    # Unconditioned job enables prod even for certi_only, which violates isolation
+    assert evaluate_deploy_prod_condition(doc, "certi_only") is True
+

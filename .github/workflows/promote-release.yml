@@ -3,6 +3,12 @@ name: promote-release
 on:
   workflow_dispatch:
     inputs:
+      deployment_goal:
+        description: Alcance ambiental autorizado de esta ejecución
+        type: choice
+        required: true
+        default: certi_only
+        options: [certi_only, certi_and_prod]
       release_sha:
         description: Full commit SHA deployed successfully to DEV
         required: true
@@ -283,6 +289,7 @@ jobs:
 
   deploy-prod:
     name: deploy-prod
+    if: ${{ inputs.deployment_goal == 'certi_and_prod' }}
     needs:
       - verify-release
       - deploy-certi

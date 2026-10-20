@@ -206,12 +206,38 @@ Para la prueba programada de laboratorio en PROD:
   - Concurrencia: 1 (`max_concurrent_runs: 1`) con encolamiento (`queue: enabled`).
 
 ### E. Rollback de Código y Despliegue
-- Rollback significa volver a promover una versión y wheel preexistentes y aprobados:
+- **Definición y Principios**:
+  - Rollback significa volver a promover una versión y wheel preexistentes y previamente aprobados.
   - Prohibido ejecutar `bundle destroy` en ambientes compartidos.
-  - Prohibido modificar jobs manualmente desde la UI o mover Git tags.
-  - Localizar el promotion record anterior y verificar checksum (`EF_USE_PREBUILT_WHEEL=true`).
-  - Redesplegar mediante `promote-release.yml` con el SHA previo y el scope completo de las 5 raíces (`clientes`, `pedidos`, `productos`, `ventas`, `orchestration`).
-  - Abrir de inmediato la PR de reconciliación en `main`.
+  - Prohibido modificar jobs manualmente desde la UI o mover/eliminar Git tags.
+  - Localizar el `deployment-record.json` del artefacto DEV correspondiente y verificar el checksum inmutable del wheel (`EF_USE_PREBUILT_WHEEL=true`).
+
+- **Control de Destino Operativo (`deployment_goal`)**:
+  - `certi_only`: Despliega realmente en CERTI (**no es un dry-run**). Es el destino operativo del ensayo de rollback y restauración ya acreditado; garantiza que `deploy-prod` sea omitido inmediatamente (`deploy-prod=skipped` en 0 s), sin requerir aprobaciones humanas del entorno PROD ni alterar jobs, clusters, schedules, tags o parámetros de producción.
+  - `certi_and_prod`: Permite promociones normales autorizadas y contingencias compatibles hacia producción, requiriendo siempre validación previa de smoke tests en CERTI y aprobación explícita humana en la compuerta de Environment de PROD (`becavas83`).
+
+- **Reglas Estrictas de Scope y Granularidad**:
+  - El redeploy respeta con exactitud el `bundle_scope` registrado en el `deployment-record.json` del artefacto DEV recuperado (cuyos `bundles[].root` definen el scope validado), a diferencia del `promotion-record.json` generado tras PROD y adjunto a la Release.
+  - Si la evidencia histórica del artefacto abarca las 5 raíces (`clientes`, `pedidos`, `productos`, `ventas`, `orchestration`), el rollback debe promover ese scope transversal completo; queda prohibido recortar raíces informalmente para forzar un rollback parcial por capability.
+  - Se conserva la distinción entre el scope transversal de 5 raíces promovido en el rollback de código y el alcance acotado a solo `orchestration` utilizado posteriormente en la restauración operativa de CERTI.
+  - Cuando se requiera revertir exclusivamente una capability específica manteniendo el resto del inventario compuesto, se debe formular una corrección hacia adelante (forward fix) mediante Pull Request desde `main`.
+
+- **Matriz de Compatibilidad de Schema**:
+  Antes de autorizar la promoción del release anterior, se debe clasificar el impacto:
+  | Naturaleza del Cambio | Decisión Operativa | Acción Requerida |
+  |---|---|---|
+  | Solo código o configuración compatible | Release anterior elegible | Promover mediante gates normales |
+  | Columna nullable aditiva que el código anterior ignora | Release anterior elegible previa verificación | Validar mediante test suite y plan de despliegue |
+  | Rename/drop de columna, cambio de tipo de dato o grano | Incompatible para rollback retrospectivo | Escalar de inmediato; prohibido rollback retrospectivo; preparar corrección hacia delante |
+  | Migración irreversible de catálogo o mutación externa | Incompatible | Ejecutar procedimiento específico de contingencia |
+
+- **Protección de Tags y Verificación de Assets de Release**:
+  - Los tags namespaced (`retail/<unidad>/v*`) están protegidos contra modificación y borrado por el Ruleset de GitHub `etl-factory-release-tags-immutable` (ID `25029202`).
+  - La protección de tags impide mover o eliminar la referencia Git, pero **no vuelve inmutables los assets de una Release** en la plataforma (`immutable=false` en la GitHub Releases API).
+  - La integridad del asset de release (`promotion-record.json`) se audita mediante verificación criptográfica de hash SHA-256 (digest `fd32fd20cc00719001825c1254ba01ff32d95b195d3d492707af2824872a28b8`), permitiendo detectar cualquier discrepancia o sustitución frente al valor auditado conservado, reconociendo que el hash no impide por sí mismo una sustitución remota.
+
+- **Reconciliación Inmediata de `main`**:
+  Tras completar el rollback y validar el servicio en Databricks, el operador debe abrir de inmediato una Pull Request de reconciliación en la rama `main` del repositorio para asegurar que el próximo despliegue no reintroduzca el defecto revertido.
 
 ## 4. Recuperación de Datos (Procedimiento Externo)
 La restauración de tablas Delta, Time Travel, backups físicos o Point-in-Time Recovery es potestad exclusiva de Data Platform y del Custodio de Datos mediante su procedimiento externo. La fábrica de software no altera datos directamente mediante comandos manuales no auditados.
@@ -227,7 +253,24 @@ La restauración de tablas Delta, Time Travel, backups físicos o Point-in-Time 
   2. Tablas Gold actualizadas con el `batch_id` esperado y reconciliaciones verificadas.
   3. Cero reglas de calidad con acción `FAIL`.
   4. Bitácora de incidente completada con causa raíz, cronología, run IDs y lecciones aprendidas.
-- **Evidencia y Retención**:
-  - Salidas JSON y diagnósticos conservados en la bitácora de auditoría de la sesión (`etl-factory-course-audit/sesion-4`).
-  - Registros de workflow y artifacts en GitHub Actions: La retención efectiva para este repositorio específico permanece **pendiente de acreditación/verificación documental** (el valor nominal por defecto de hasta 90 días no sustituye la inspección de la configuración efectiva o volcado de API de la organización/cuenta).
-  - Registros y logs en Databricks: La política formal de retención de system tables (ej. 365 días) y logs de compute permanece igualmente **pendiente de verificación/acreditación documental**.
+- **Evidencia y Retención de Plataforma**:
+  - **Confirmación Administrativa de la Cuenta (18 de octubre de 2026)**:
+    - El propietario de la cuenta (`becavas`) confirmó formalmente que la funcionalidad *Account Console → Previews → System Tables Configurable Retention* **no está habilitada** (`enabled: false`).
+    - En consecuencia, el default de 395 días de esa Beta no aplica a este entorno; rige la política estándar específica por cada tabla del sistema.
+    - La existencia de una ventana formal no presupone la presencia de registros para todo el período ni reemplaza las garantías de recuperación ante desastre.
+
+  - **Matriz de Políticas de Retención por Recurso**:
+    | Recurso / Sistema | Política de Retención | Fuente Oficial y Verificación | Custodio / Owner | Calificación y Reglas Operativas |
+    |---|---|---|---|---|
+    | `system.lakeflow.jobs` | 365 días | [Jobs system tables](https://learn.microsoft.com/en-us/azure/databricks/admin/system-tables/jobs) (2026-10-18) | `becavas` (`bcastillo@techdic.onmicrosoft.com`) | Histórico de cambios en definiciones de Jobs; el **último registro por entidad se conserva indefinidamente** aun si excede la ventana |
+    | `system.lakeflow.job_run_timeline` | 365 días | [System tables](https://learn.microsoft.com/en-us/azure/databricks/admin/system-tables/) (2026-10-18) | `becavas` (`bcastillo@techdic.onmicrosoft.com`) | Registro de ejecuciones segmentado por slices temporales; requiere agregación por `run_id` |
+    | `system.billing.usage` | 365 días | [System tables](https://learn.microsoft.com/en-us/azure/databricks/admin/system-tables/) (2026-10-18) | `becavas` (`bcastillo@techdic.onmicrosoft.com`) | Registro de consumo medido por SKU y atribuible por `job_id` y `job_run_id` |
+    | `system.access.audit` | 365 días | [System tables](https://learn.microsoft.com/en-us/azure/databricks/admin/system-tables/) (2026-10-18) | `becavas` (`bcastillo@techdic.onmicrosoft.com`) | Registro de auditoría de llamadas de API y eventos de control de acceso |
+    | `system.access.table_lineage` | 365 días | [System tables](https://learn.microsoft.com/en-us/azure/databricks/admin/system-tables/) (2026-10-18) | `becavas` (`bcastillo@techdic.onmicrosoft.com`) | Trazabilidad y dependencias entre tablas y jobs de runtime |
+    | `system.billing.list_prices` | Indefinida | [System tables](https://learn.microsoft.com/en-us/azure/databricks/admin/system-tables/) (2026-10-18) | `becavas` (`bcastillo@techdic.onmicrosoft.com`) | Listas de precios oficiales vigentes en la plataforma |
+    | `system.information_schema.tables` | Sin ventana histórica de eventos | [Information schema](https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/sql-ref-information-schema) (2026-10-18) | `becavas` (`bcastillo@techdic.onmicrosoft.com`) | Describe metadata viva del catálogo y filtra dinámicamente según privilegios del llamador |
+    | GitHub Actions (runs, logs, checks) | 90 días | Configuración de repositorio verificada (2026-10-17) | `becavas` / `becavas83` | Retención de historial de workflows, logs de CI/CD y checks |
+    | GitHub Actions Build Artifacts (`build-artifact`) | 1 día | [Actions artifacts API](https://docs.github.com/en/rest/actions/artifacts) (Workflow `deploy-dev.yml`, 2026-10-17) | `becavas` / `becavas83` | Artefacto temporal para transferencia entre jobs del pipeline de despliegue DEV |
+    | GitHub Actions Deployment Artifacts (`dev-release-*`, `certi-release-*`) | 90 días (`expires_at: 2027-01-15T09:21:44Z`) | [Actions artifacts API](https://docs.github.com/en/rest/actions/artifacts) (2026-10-17) | `becavas` / `becavas83` | Artefactos generados por workflows de promoción con retención de 90 días |
+    | GitHub Release Assets (`promotion-record.json`) | Sin expiración automática declarada (`immutable=false`) | [Release assets API](https://docs.github.com/en/rest/releases/assets) (2026-10-17) | `becavas` / `becavas83` | Adjuntos a releases publicadas; integridad auditada por digest SHA-256; no se rigen por la retención de Actions |
+    | Evidencia y Bitácora de Auditoría Local | Almacenamiento local del entorno | Auditoría local (2026-10-19) | `becavas` (mantenida con soporte de Antigravity) | Conservada en `etl-factory-course-audit/sesion-4/`. La ausencia de expiración automática no garantiza permanencia ante contingencias físicas sin una política corporativa adicional de respaldo |

@@ -6,16 +6,18 @@ Este repositorio consume los siguientes recursos. Su aprovisionamiento y lifecyc
 
 | Tipo | Nombre lógico | Nombre físico | Garantía requerida | Owner | Estado |
 |---|---|---|---|---|---|
-| Workspace | `sandbox` | URL administrada fuera de Git | Usuario U2M habilitado | Data Platform | Verificado |
-| Catálogo | `retail` | `retail_sbx_a001` | Visible y vinculado al workspace sandbox | Data Platform | Verificado |
+| Workspace | `sandbox` | ID `7405615183307398` (`https://adb-7405615183307398.18.azuredatabricks.net`) | Usuario U2M habilitado | Data Platform | Verificado |
+| Catálogo | `retail` | `retail_sbx_a001` | Catálogo aislado (`ISOLATED`), visible y vinculado exclusivamente al workspace sandbox | Data Platform | Verificado |
 | Schema | `landing` | `retail_sbx_a001.landing` | `USE SCHEMA` | Data Platform | Verificado |
 | Schema | `bronze` | `retail_sbx_a001.bronze` | Crear/modificar objetos según rol acordado | Data Platform | Verificado |
-| Schema | `silver` | `retail_sbx_a001.silver` | Crear/modificar objetos según rol acordado | Data Platform | Verificado |
+| Schema | `silver` | `retail_sbx_a001.silver` | Crear/modificar objetos según rol acordado; incluye tabla `silver.clientes_curated` | Data Platform | Verificado |
 | Schema | `gold` | `retail_sbx_a001.gold` | Crear/modificar objetos según rol acordado | Data Platform | Verificado |
 | Volume | `pedidos_source` | `retail_sbx_a001.landing.pedidos_source` | `READ VOLUME` y dataset de capacitación | Data Platform | Verificado |
 | Volume | `clientes_source` | `retail_sbx_a001.landing.clientes_source` | `READ VOLUME` y dataset de capacitación | Data Platform | Verificado |
 | Volume | `productos_source` | `retail_sbx_a001.landing.productos_source` | `READ VOLUME` y dataset de capacitación | Data Platform | Verificado |
+| Volume | `devoluciones_source` | `retail_sbx_a001.landing.devoluciones_source` | `USE CATALOG`, `USE SCHEMA`, `READ VOLUME`, `WRITE VOLUME` para publicación/evaluación; el owner humano existente (`becavas`) posee las facultades aplicables y conserva poderes administrativos como excepción (sin mínimo privilegio ni grants redundantes) | Data Platform | Verificado (preexistente) |
 | Compute policy | `uc_standard_job_compute` | Policy ID administrado externamente | `CAN_USE`, classic job compute, `SINGLE_USER` permitido | Data Platform | Verificado |
+
 
 ## DEV
 
@@ -106,20 +108,34 @@ Los Volumes continúan organizados por `batch_id=<batch_id>`. No se introduce ot
 
 La ruta operativa elegida para esta instalación es **Slack personal**. El propietario del laboratorio opera el canal privado `etl-factory-alertas` en su workspace ADRs y la app ETL Factory Lab Alerts. Gmail sirve únicamente para identificar al propietario de Slack; no recibe las alertas. Teams es una adaptación corporativa opcional del curso. `DATABRICKS_NOTIFICATION_DESTINATION_ID` se custodia en cada GitHub Environment; el repositorio no hospeda el receptor ni contiene webhooks.
 
+## Governed Tags de Cuenta (Taxonomía de Laboratorio)
+
+Creados y autorizados en la cuenta Databricks por el Administrador de Plataforma y validados bajo la simulación de Fase 15 §2.1:
+
+| Clave de Tag | Valores Permitidos | Alcance | Propósito |
+|---|---|---|---|
+| `data_domain` | `retail` | Cuenta | Identificación formal del dominio de datos |
+| `data_classification` | `internal`, `confidential`, `restricted` | Cuenta | Clasificación de confidencialidad y criticidad |
+| `lifecycle` | `active`, `deprecated`, `retired` | Cuenta | Estado del ciclo de vida del activo de datos |
+
+Estos tags constituyen una taxonomía de laboratorio aprobada por el propietario (`account_admin` con permiso implícito `ASSIGN`) para validar controles técnicos de gobierno; no representan una política corporativa externa.
+
 ## Operador, Responsabilidades y Contrato de Acceso
 
-- **Propietario del Laboratorio y Administrador Responsable**: El alumno y propietario (`becavas`, identidad humana `bcastillo@techdic.onmicrosoft.com`) es el administrador responsable de la plataforma del laboratorio, autoriza las operaciones y mantiene los recursos.
-- **Asistente de Plataforma y Autor de la Guía**: Codex mantiene la guía oficial y asiste en especificaciones y cambios técnicos autorizados. Codex **no es el owner administrativo ni una persona de guardia**.
-- **Segregación de Funciones en Laboratorio**: Para la revisión de Pull Requests y la aprobación obligatoria del GitHub Environment `prod` se utiliza la cuenta `becavas83`. Se documenta formalmente que **una persona operando dos cuentas representa una emulación técnica y no demuestra segregación humana real ni mínimo privilegio estricto**.
+- **Propietario del Laboratorio, Administrador de Plataforma y Autor (`becavas`)**: El alumno y propietario (`bcastillo@techdic.onmicrosoft.com`) es el autor del código, administrador responsable de la plataforma del laboratorio y titular del rol `account_admin` en Databricks (con facultad implícita `ASSIGN` sobre tags gobernados). Autoriza las operaciones y mantiene los recursos.
+- **Identidad Revisora GitHub en Simulación (`becavas83`)**: Cuenta secundaria del operador utilizada para la revisión formal de Pull Requests y la aprobación obligatoria de compuertas de despliegue (Environment `prod`). Cuenta con permiso `write` verificado en el repositorio. Se documenta formalmente conforme a Fase 15 §2.1 y §10.1 que **una persona operando dos cuentas representa una emulación técnica y no demuestra segregación humana real ni mínimo privilegio estricto**.
+- **Estado de Protecciones de Rama `main`**: El archivo `.github/CODEOWNERS` y la solicitud de revisión a `becavas83` en la PR preparatoria (#31) no demuestran por sí mismos que los controles de rama protegida en `main` estén ya activos. La configuración de revisión obligatoria por code owners (al menos 1 aprobación), descarte de aprobaciones obsoletas tras nuevos commits (`dismiss_stale_reviews`), aprobación del último push revisable y resolución obligatoria de conversaciones permanecen **pendientes de activación por el Administrador** una vez integrada formalmente esta PR preparatoria.
+- **Herramienta de Asistencia e Implementación (Antigravity)**: Asistente técnico de IA para desarrollo de código, pruebas, verificación y recolección de evidencias. Opera como herramienta de soporte técnico del alumno; no asume autoría humana, ownership ni rol de aprobación.
+- **Evaluador Técnico y Auditor del Curso (Codex)**: Mantiene la guía oficial del curso y evalúa técnicamente las evidencias de la fábrica antes de decisiones de gate y fusiones en `main`. No es el owner administrativo de la infraestructura ni persona de guardia de operaciones.
 - Canales corporativos no acreditados (ej. `#data-platform-soporte`), guardias de operaciones rotativas y comités de gobernanza corporativos quedan marcados como **pendientes de acreditación corporativa externa**.
 - El Data Engineer utiliza identidad personal exclusivamente en sandbox; DEV, CERTI y PROD operan mediante identidades automatizadas segregadas (deployer y runtime SPs). Acciones operativas de repair son ejecutadas por el operador autorizado vía OAuth con permisos `CAN_MANAGE_RUN`, procesando bajo el runtime SP del ambiente.
 
 ## Observabilidad y Retención Verificada
 
-- **Observabilidad de Plataforma**: El 13 de octubre de 2026, Codex comprobó lectura exitosa sobre 7 system tables (`system.lakeflow.jobs`, `job_run_timeline`, `billing.usage`, `billing.list_prices`, `access.audit`, `access.table_lineage`, `information_schema.tables`) utilizando el warehouse CERTI `e637b60e6f465fde` con la identidad humana `bcastillo@techdic.onmicrosoft.com` (`certi-platform`). El warehouse fue apagado a `STOPPED` tras la verificación. Este acceso corresponde al administrador humano comprobado; no está concedido a runtime SPs ni a evaluadores externos.
-- **Retención de Evidencia**:
-  - GitHub Actions: La configuración efectiva de retención de workflows y artifacts para este repositorio específico permanece **pendiente de acreditación/verificación documental**; el valor nominal por defecto de hasta 90 días no sustituye la evidencia de configuración efectiva.
-  - Databricks system tables / compute logs: Política formal de retención (ej. 365 días) permanece marcada como **pendiente de verificación/acreditación documental**.
+- **Observabilidad de Plataforma**: Codex y el operador comprobaron lectura exitosa sobre 7 system tables (`system.lakeflow.jobs`, `job_run_timeline`, `billing.usage`, `billing.list_prices`, `access.audit`, `access.table_lineage`, `information_schema.tables`) utilizando el warehouse CERTI `e637b60e6f465fde` con la identidad humana `bcastillo@techdic.onmicrosoft.com` (`certi-platform`). Los SQL warehouses permanecen en estado `STOPPED` y solo se inician temporalmente bajo autorización explícita para lecturas de auditoría acotadas.
+- **Políticas de Retención Verificadas**:
+  Las políticas de retención, fuentes oficiales y procedimientos de custodia técnica están documentados y enlazados formalmente en [`docs/operations/retail-runbook.md`](operations/retail-runbook.md#5-políticas-de-retención-y-custodia-de-artefactos). Para preservar una única fuente de verdad documental, no se duplica la matriz técnica en este documento; el runbook contiene los plazos verificados (artefactos de GitHub Actions 90 días, GitHub Releases sin expiración por API, y retención configurable de Databricks deshabilitada a nivel de cuenta / default de Beta).
+
 
 ## Configuración local de verificación
 

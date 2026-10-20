@@ -277,7 +277,7 @@ def test_onboarding_sandbox_only_root_growth_and_isolation(synthetic_repo: Path)
 
 def test_onboarding_sandbox_root_in_actual_repo_inventory(tmp_path: Path):
     """Verifies adding a sandbox-only capability to a replica of the real repo
-    preserves existing DEV roots.
+    preserves existing DEV roots and allows inventory growth relative to base.
     """
     repo_copy = tmp_path / "repo_copy"
     repo_copy.mkdir()
@@ -286,7 +286,18 @@ def test_onboarding_sandbox_root_in_actual_repo_inventory(tmp_path: Path):
     shutil.copytree(REPO_ROOT / "domains", repo_copy / "domains")
     shutil.copytree(REPO_ROOT / "scripts", repo_copy / "scripts")
 
-    # Add a synthetic sandbox-only capability to the actual domain
+    # Discover base inventory and base DEV roots before adding the synthetic fixture
+    base_discovered = sorted(discover_bundles(repo_root=repo_copy).values())
+    base_dev_roots = sorted(
+        b for b in base_discovered if bundle_declares_target(b, "dev", repo_root=repo_copy)
+    )
+
+    # Base inventory must preserve the 5 initial DEV roots
+    for root in EXISTING_DEV_BUNDLES:
+        assert root in base_discovered
+        assert root in base_dev_roots
+
+    # Add a synthetic sandbox-only capability to the replica
     synthetic_sbx = repo_copy / "domains" / "retail" / "capabilities" / "synthetic_sandbox"
     synthetic_sbx.mkdir(parents=True)
     with open(synthetic_sbx / "databricks.yml", "w", encoding="utf-8") as f:
@@ -301,29 +312,36 @@ def test_onboarding_sandbox_root_in_actual_repo_inventory(tmp_path: Path):
         )
     synthetic_sbx_root = "domains/retail/capabilities/synthetic_sandbox"
 
-    # Untargeted discovery returns all 6 bundles
+    # Untargeted discovery grows by exactly +1 relative to the base inventory
     all_discovered = sorted(discover_bundles(repo_root=repo_copy).values())
-    assert len(all_discovered) == 6
+    assert len(all_discovered) == len(base_discovered) + 1
+    assert set(all_discovered) == set(base_discovered) | {synthetic_sbx_root}
     assert synthetic_sbx_root in all_discovered
     for root in EXISTING_DEV_BUNDLES:
         assert root in all_discovered
 
-    # Shared change without target discovers all 6 bundles
+    # Shared change without target discovers all bundles (base inventory + synthetic fixture)
     assert (
         affected_bundles([".github/CODEOWNERS"], target=None, repo_root=repo_copy) == all_discovered
     )
 
-    # Shared change targeting DEV returns exactly the 5 existing DEV roots
-    assert (
-        affected_bundles([".github/CODEOWNERS"], target="dev", repo_root=repo_copy)
-        == EXISTING_DEV_BUNDLES
-    )
+    # Shared change targeting DEV returns all base DEV roots, excluding synthetic sandbox-only root
+    dev_selected = affected_bundles([".github/CODEOWNERS"], target="dev", repo_root=repo_copy)
+    assert dev_selected == base_dev_roots
+    assert synthetic_sbx_root not in dev_selected
+    for root in EXISTING_DEV_BUNDLES:
+        assert root in dev_selected
 
     # Direct change in synthetic sandbox root is excluded from DEV
     assert (
         affected_bundles([f"{synthetic_sbx_root}/source.py"], target="dev", repo_root=repo_copy)
         == []
     )
+
+    # Direct change in synthetic sandbox root without target selects only itself
+    assert affected_bundles(
+        [f"{synthetic_sbx_root}/source.py"], target=None, repo_root=repo_copy
+    ) == [synthetic_sbx_root]
 
 
 def test_cli_execution_with_target_dev(monkeypatch, capsys):

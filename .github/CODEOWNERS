@@ -1,34 +1,50 @@
-# Default technical review
-* @becavas
+# Default technical review in personal repository simulation (Fase 15 §10.1)
+* @becavas83
 
-# Protect ownership rules and shared factory tooling
-/.github/ @becavas
-/tools/bundle_generator/ @becavas
-/docs/standards/ @becavas
-/pyproject.toml @becavas
-/environment.yml @becavas
-/scripts/ @becavas
+# Ownership file, CI/CD delivery controls and workflows
+/.github/ @becavas83
+/.github/workflows/ @becavas83
+/pyproject.toml @becavas83
+/environment.yml @becavas83
 
-# Capability ownership
-/domains/retail/capabilities/pedidos/ @becavas
-/src/enterprise_fabric/retail/pedidos/ @becavas
-/tests/retail/pedidos/ @becavas
-/domains/retail/capabilities/clientes/ @becavas
-/src/enterprise_fabric/retail/clientes/ @becavas
-/tests/retail/clientes/ @becavas
-/domains/retail/capabilities/productos/ @becavas
-/src/enterprise_fabric/retail/productos/ @becavas
-/tests/retail/productos/ @becavas
-/domains/retail/capabilities/ventas/ @becavas
-/domains/retail/capabilities/ventas/contracts/ @becavas
-/src/enterprise_fabric/retail/ventas/ @becavas
-/tests/retail/ventas/ @becavas
+# Governance, standards, ADRs and documentation
+/docs/standards/ @becavas83
+/docs/architecture/ @becavas83
+/docs/adr/ @becavas83
+/docs/governance/ @becavas83
+/ops/governance/ @becavas83
+
+# Factory tooling and automation scripts
+/tools/ @becavas83
+/tools/bundle_generator/ @becavas83
+/scripts/ @becavas83
+
+# Retail capabilities (specs, bundles, contracts, code, tests)
+/domains/retail/capabilities/ @becavas83
+/domains/retail/capabilities/pedidos/ @becavas83
+/src/enterprise_fabric/retail/pedidos/ @becavas83
+/tests/retail/pedidos/ @becavas83
+
+/domains/retail/capabilities/clientes/ @becavas83
+/src/enterprise_fabric/retail/clientes/ @becavas83
+/tests/retail/clientes/ @becavas83
+
+/domains/retail/capabilities/productos/ @becavas83
+/src/enterprise_fabric/retail/productos/ @becavas83
+/tests/retail/productos/ @becavas83
+
+/domains/retail/capabilities/ventas/ @becavas83
+/domains/retail/capabilities/ventas/contracts/ @becavas83
+/src/enterprise_fabric/retail/ventas/ @becavas83
+/tests/retail/ventas/ @becavas83
 
 # Shared primitives
-/src/enterprise_fabric/shared/ @becavas
-/tests/shared/ @becavas
+/src/enterprise_fabric/shared/ @becavas83
+/tests/shared/ @becavas83
 
 # Domain orchestration
-/domains/retail/orchestration/ @becavas
-/tests/domains/retail/orchestration/ @becavas
+/domains/retail/orchestration/ @becavas83
+/tests/domains/retail/orchestration/ @becavas83
 
+# General test suite
+/tests/ @becavas83

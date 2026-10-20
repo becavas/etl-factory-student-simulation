@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path, PurePosixPath
+
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SHARED_EXACT = {
@@ -34,16 +37,16 @@ SHARED_PREFIXES = (
 )
 
 
-def discover_bundles() -> dict[tuple[str, str], str]:
+def discover_bundles(repo_root: Path = REPO_ROOT) -> dict[tuple[str, str], str]:
     bundles = {}
     patterns = (
         "domains/*/capabilities/*/databricks.yml",
         "domains/*/orchestration/databricks.yml",
     )
     for pattern in patterns:
-        for config in sorted(REPO_ROOT.glob(pattern)):
+        for config in sorted(repo_root.glob(pattern)):
             root = config.parent
-            relative = root.relative_to(REPO_ROOT).as_posix()
+            relative = root.relative_to(repo_root).as_posix()
             if root.name == "orchestration":
                 key = (root.parent.name, "orchestration")
             else:
@@ -52,8 +55,29 @@ def discover_bundles() -> dict[tuple[str, str], str]:
     return bundles
 
 
-def affected_bundles(paths: list[str]) -> list[str]:
-    known = discover_bundles()
+def bundle_declares_target(bundle_root: str, target: str, repo_root: Path = REPO_ROOT) -> bool:
+    """Check if databricks.yml in bundle_root explicitly declares the target."""
+    config_path = repo_root / bundle_root / "databricks.yml"
+    if not config_path.is_file():
+        return False
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        if isinstance(data, dict):
+            targets = data.get("targets")
+            if isinstance(targets, dict):
+                return target in targets
+    except Exception:
+        return False
+    return False
+
+
+def affected_bundles(
+    paths: list[str],
+    target: str | None = None,
+    repo_root: Path = REPO_ROOT,
+) -> list[str]:
+    known = discover_bundles(repo_root=repo_root)
     selected: set[str] = set()
     shared_changed = False
     for raw_path in paths:
@@ -95,12 +119,28 @@ def affected_bundles(paths: list[str]) -> list[str]:
                     selected.add(known[key])
     if shared_changed:
         selected.update(known.values())
+
+    if target:
+        selected = {
+            root for root in selected if bundle_declares_target(root, target, repo_root=repo_root)
+        }
+
     return sorted(selected)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Select affected Bundle roots based on changed files and target."
+    )
+    parser.add_argument(
+        "--target",
+        help="Only select bundles that explicitly declare this target.",
+        default=None,
+    )
+    args = parser.parse_args(argv)
+
     paths = [line.rstrip("\n") for line in sys.stdin]
-    for bundle_root in affected_bundles(paths):
+    for bundle_root in affected_bundles(paths, target=args.target):
         print(bundle_root)
     return 0
 

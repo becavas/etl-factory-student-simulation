@@ -90,7 +90,7 @@ jobs:
         env:
           EF_LAB_PAUSE: ${{ github.event_name == 'workflow_dispatch' && inputs.pause_after_first_capability }}
         run: |
-          python scripts/affected_bundles.py \
+          python scripts/affected_bundles.py --target dev \
             < /tmp/changed-paths.txt \
             > /tmp/affected-bundles.txt
           bundles=$(jq -Rsc 'split("\n") | map(select(length > 0))' \

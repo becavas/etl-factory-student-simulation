@@ -1,4 +1,5 @@
 import io
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +10,7 @@ from scripts.affected_bundles import (
     REPO_ROOT,
     affected_bundles,
     bundle_declares_target,
+    discover_bundles,
     main,
 )
 
@@ -17,7 +19,15 @@ PEDIDOS = "domains/retail/capabilities/pedidos"
 PRODUCTOS = "domains/retail/capabilities/productos"
 VENTAS = "domains/retail/capabilities/ventas"
 ORCHESTRATION = "domains/retail/orchestration"
-ALL_BUNDLES = sorted([CLIENTES, PEDIDOS, PRODUCTOS, VENTAS, ORCHESTRATION])
+EXISTING_DEV_BUNDLES = sorted([CLIENTES, PEDIDOS, PRODUCTOS, VENTAS, ORCHESTRATION])
+
+
+def all_known_bundles() -> list[str]:
+    return sorted(discover_bundles().values())
+
+
+def all_dev_bundles() -> list[str]:
+    return sorted(b for b in discover_bundles().values() if bundle_declares_target(b, "dev"))
 
 
 def test_clientes_only_change_selects_only_clientes():
@@ -43,10 +53,22 @@ def test_orchestration_change_selects_only_orchestration():
 
 
 def test_shared_change_selects_capabilities_and_orchestration():
-    assert affected_bundles([".github/workflows/pull-request.yml"]) == ALL_BUNDLES
+    # Untargeted discovery returns all discovered bundles in the repository dynamically
+    assert affected_bundles([".github/workflows/pull-request.yml"]) == all_known_bundles()
+    for root in EXISTING_DEV_BUNDLES:
+        assert root in affected_bundles([".github/workflows/pull-request.yml"])
+
+    # Target dev returns only bundles declaring dev
+    assert (
+        affected_bundles([".github/workflows/pull-request.yml"], target="dev") == all_dev_bundles()
+    )
+    for root in EXISTING_DEV_BUNDLES:
+        assert root in affected_bundles([".github/workflows/pull-request.yml"], target="dev")
 
 
 def test_shared_release_delivery_controls_select_all_bundles():
+    expected_all = all_known_bundles()
+    expected_dev = all_dev_bundles()
     for path in (
         ".github/workflows/promote-release.yml",
         ".github/workflows/publish-release.yml",
@@ -54,15 +76,23 @@ def test_shared_release_delivery_controls_select_all_bundles():
         "scripts/verify_release_publication.py",
         "scripts/write_promotion_record.py",
     ):
-        assert affected_bundles([path]) == ALL_BUNDLES
+        assert affected_bundles([path]) == expected_all
+        assert affected_bundles([path], target="dev") == expected_dev
 
 
 def test_shared_generator_change_selects_every_capability():
-    assert affected_bundles(["tools/bundle_generator/generator.py"]) == ALL_BUNDLES
+    assert affected_bundles(["tools/bundle_generator/generator.py"]) == all_known_bundles()
+    assert (
+        affected_bundles(["tools/bundle_generator/generator.py"], target="dev") == all_dev_bundles()
+    )
 
 
 def test_shared_code_change_selects_every_capability():
-    assert affected_bundles(["src/enterprise_fabric/shared/spark.py"]) == ALL_BUNDLES
+    assert affected_bundles(["src/enterprise_fabric/shared/spark.py"]) == all_known_bundles()
+    assert (
+        affected_bundles(["src/enterprise_fabric/shared/spark.py"], target="dev")
+        == all_dev_bundles()
+    )
 
 
 def test_docs_only_change_selects_no_capability():
@@ -83,7 +113,7 @@ def test_removed_orchestration_bundle_does_not_disappear_silently():
 
 
 def test_target_dev_preserves_existing_dev_roots():
-    for root in (CLIENTES, PEDIDOS, PRODUCTOS, VENTAS, ORCHESTRATION):
+    for root in EXISTING_DEV_BUNDLES:
         assert bundle_declares_target(root, "dev") is True
 
     assert affected_bundles(
@@ -95,7 +125,7 @@ def test_target_dev_preserves_existing_dev_roots():
             [".github/CODEOWNERS"],
             target="dev",
         )
-        == ALL_BUNDLES
+        == all_dev_bundles()
     )
 
 
@@ -185,6 +215,115 @@ def test_synthetic_dev_bundle_direct_change_selected_for_dev(synthetic_repo: Pat
     std_root = "domains/retail/capabilities/standard"
     change = ["domains/retail/capabilities/standard/specs/jobs.yml"]
     assert affected_bundles(change, target="dev", repo_root=synthetic_repo) == [std_root]
+
+
+def test_onboarding_sandbox_only_root_growth_and_isolation(synthetic_repo: Path):
+    """Verifies that adding a new sandbox-only root grows discovery without breaking DEV scope."""
+    std_root = "domains/retail/capabilities/standard"
+    orch_root = "domains/retail/orchestration"
+    sbx_root = "domains/retail/capabilities/sandbox_only"
+
+    # Onboard an additional synthetic sandbox-only capability
+    onboarded_cap = synthetic_repo / "domains" / "retail" / "capabilities" / "onboarded_sandbox"
+    onboarded_cap.mkdir(parents=True)
+    with open(onboarded_cap / "databricks.yml", "w", encoding="utf-8") as f:
+        yaml.dump(
+            {
+                "bundle": {"name": "retail_onboarded_sandbox"},
+                "targets": {
+                    "sandbox": {"mode": "development", "default": True},
+                },
+            },
+            f,
+        )
+    onboarded_root = "domains/retail/capabilities/onboarded_sandbox"
+
+    # 1. Inventory discovery dynamically includes the new root (count = 4)
+    all_discovered = sorted(discover_bundles(repo_root=synthetic_repo).values())
+    assert all_discovered == sorted([std_root, orch_root, sbx_root, onboarded_root])
+
+    # 2. Untargeted shared change discovers all 4 roots (no global list editing needed)
+    assert (
+        affected_bundles(
+            [".github/workflows/pull-request.yml"], target=None, repo_root=synthetic_repo
+        )
+        == all_discovered
+    )
+
+    # 3. Direct change to onboarded root is discovered untargeted
+    assert affected_bundles(
+        [f"{onboarded_root}/specs/jobs.yml"], target=None, repo_root=synthetic_repo
+    ) == [onboarded_root]
+
+    # 4. Direct change to onboarded root is strictly excluded from DEV
+    assert (
+        affected_bundles(
+            [f"{onboarded_root}/specs/jobs.yml"], target="dev", repo_root=synthetic_repo
+        )
+        == []
+    )
+
+    # 5. Shared change targeting DEV selects ONLY dev-enabled roots
+    # (excludes both sandbox-only roots)
+    assert affected_bundles(
+        [".github/CODEOWNERS"], target="dev", repo_root=synthetic_repo
+    ) == sorted([std_root, orch_root])
+
+    # 6. DEV capabilities retain expected behavior
+    assert affected_bundles(
+        [f"{std_root}/specs/jobs.yml"], target="dev", repo_root=synthetic_repo
+    ) == [std_root]
+
+
+def test_onboarding_sandbox_root_in_actual_repo_inventory(tmp_path: Path):
+    """Verifies adding a sandbox-only capability to a replica of the real repo
+    preserves existing DEV roots.
+    """
+    repo_copy = tmp_path / "repo_copy"
+    repo_copy.mkdir()
+
+    # Replicate actual domains directory and scripts
+    shutil.copytree(REPO_ROOT / "domains", repo_copy / "domains")
+    shutil.copytree(REPO_ROOT / "scripts", repo_copy / "scripts")
+
+    # Add a synthetic sandbox-only capability to the actual domain
+    synthetic_sbx = repo_copy / "domains" / "retail" / "capabilities" / "synthetic_sandbox"
+    synthetic_sbx.mkdir(parents=True)
+    with open(synthetic_sbx / "databricks.yml", "w", encoding="utf-8") as f:
+        yaml.dump(
+            {
+                "bundle": {"name": "retail_synthetic_sandbox"},
+                "targets": {
+                    "sandbox": {"mode": "development", "default": True},
+                },
+            },
+            f,
+        )
+    synthetic_sbx_root = "domains/retail/capabilities/synthetic_sandbox"
+
+    # Untargeted discovery returns all 6 bundles
+    all_discovered = sorted(discover_bundles(repo_root=repo_copy).values())
+    assert len(all_discovered) == 6
+    assert synthetic_sbx_root in all_discovered
+    for root in EXISTING_DEV_BUNDLES:
+        assert root in all_discovered
+
+    # Shared change without target discovers all 6 bundles
+    assert (
+        affected_bundles([".github/CODEOWNERS"], target=None, repo_root=repo_copy) == all_discovered
+    )
+
+    # Shared change targeting DEV returns exactly the 5 existing DEV roots
+    assert (
+        affected_bundles([".github/CODEOWNERS"], target="dev", repo_root=repo_copy)
+        == EXISTING_DEV_BUNDLES
+    )
+
+    # Direct change in synthetic sandbox root is excluded from DEV
+    assert (
+        affected_bundles([f"{synthetic_sbx_root}/source.py"], target="dev", repo_root=repo_copy)
+        == []
+    )
 
 
 def test_cli_execution_with_target_dev(monkeypatch, capsys):

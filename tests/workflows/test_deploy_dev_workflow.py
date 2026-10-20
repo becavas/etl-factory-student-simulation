@@ -246,6 +246,176 @@ def test_lab_scope_rejects_empty_or_insufficient_selection(
         assert "count=0" in (tmp_path / "outputs.txt").read_text()
 
 
+def test_real_selection_step_with_real_selector_isolates_sandbox_only_bundles(tmp_path):
+    """Executes the exact 'Select affected Bundles' step from deploy-dev.yml with the real selector.
+
+    Verifies that sandbox-only bundles are excluded from DEV scope for both direct
+    and shared changes without using mock stubs for python or the selector.
+    """
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    scripts_dir = repo_dir / "scripts"
+    scripts_dir.mkdir()
+    shutil.copy2(Path("scripts/affected_bundles.py"), scripts_dir)
+
+    # Capability 1: DEV-enabled capability
+    std_cap = repo_dir / "domains" / "retail" / "capabilities" / "standard"
+    std_cap.mkdir(parents=True)
+    with open(std_cap / "databricks.yml", "w", encoding="utf-8") as f:
+        yaml.dump(
+            {
+                "bundle": {"name": "retail_standard"},
+                "targets": {
+                    "sandbox": {"mode": "development", "default": True},
+                    "dev": {"mode": "production"},
+                },
+            },
+            f,
+        )
+
+    # Capability 2: Sandbox-only capability (no DEV target)
+    sbx_cap = repo_dir / "domains" / "retail" / "capabilities" / "sandbox_only"
+    sbx_cap.mkdir(parents=True)
+    with open(sbx_cap / "databricks.yml", "w", encoding="utf-8") as f:
+        yaml.dump(
+            {
+                "bundle": {"name": "retail_sandbox_only"},
+                "targets": {
+                    "sandbox": {"mode": "development", "default": True},
+                },
+            },
+            f,
+        )
+
+    # Domain orchestration: DEV-enabled
+    orch = repo_dir / "domains" / "retail" / "orchestration"
+    orch.mkdir(parents=True)
+    with open(orch / "databricks.yml", "w", encoding="utf-8") as f:
+        yaml.dump(
+            {
+                "bundle": {"name": "retail_orchestration"},
+                "targets": {
+                    "sandbox": {"mode": "development", "default": True},
+                    "dev": {"mode": "production"},
+                },
+            },
+            f,
+        )
+
+    step = next(
+        s
+        for s in workflow()["jobs"]["select-and-check"]["steps"]
+        if s["name"] == "Select affected Bundles"
+    )
+    step_script = step["run"]
+    assert "scripts/affected_bundles.py --target dev" in step_script
+
+    def execute_step(changed_paths: list[str]) -> tuple[int, list[str], int, str]:
+        paths_file = tmp_path / "changed-paths.txt"
+        paths_file.write_text("\n".join(changed_paths) + "\n", encoding="utf-8")
+        bundles_file = tmp_path / "affected-bundles.txt"
+        if bundles_file.exists():
+            bundles_file.unlink()
+        output_file = tmp_path / "outputs.txt"
+        if output_file.exists():
+            output_file.unlink()
+
+        adapted_script = step_script.replace("/tmp/", str(tmp_path) + "/")
+        env = {
+            **os.environ,
+            "GITHUB_OUTPUT": str(output_file),
+            "EF_LAB_PAUSE": "false",
+        }
+        # Run real bash, real python, NO STUBS
+        proc = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", adapted_script],
+            cwd=repo_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        selected_bundles = (
+            bundles_file.read_text(encoding="utf-8").splitlines() if bundles_file.exists() else []
+        )
+        outputs = output_file.read_text(encoding="utf-8") if output_file.exists() else ""
+        count = 0
+        for line in outputs.splitlines():
+            if line.startswith("count="):
+                count = int(line.split("=", 1)[1])
+        return proc.returncode, selected_bundles, count, outputs
+
+    # 1. Direct change to sandbox-only bundle is excluded from DEV
+    code, bundles, count, _ = execute_step(
+        ["domains/retail/capabilities/sandbox_only/specs/jobs.yml"]
+    )
+    assert code == 0
+    assert bundles == []
+    assert count == 0
+
+    # 2. Direct change to DEV bundle is selected
+    code, bundles, count, _ = execute_step(["domains/retail/capabilities/standard/specs/jobs.yml"])
+    assert code == 0
+    assert bundles == ["domains/retail/capabilities/standard"]
+    assert count == 1
+
+    # 3. Shared change selects only DEV-enabled bundles (excludes sandbox_only)
+    code, bundles, count, _ = execute_step([".github/CODEOWNERS"])
+    assert code == 0
+    assert sorted(bundles) == [
+        "domains/retail/capabilities/standard",
+        "domains/retail/orchestration",
+    ]
+    assert "domains/retail/capabilities/sandbox_only" not in bundles
+    assert count == 2
+
+
+def test_workflow_step_fails_isolation_when_target_dev_is_removed(tmp_path):
+    """Mutant test: confirms removing '--target dev' leaks sandbox-only bundles into DEV scope."""
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    scripts_dir = repo_dir / "scripts"
+    scripts_dir.mkdir()
+    shutil.copy2(Path("scripts/affected_bundles.py"), scripts_dir)
+
+    sbx_cap = repo_dir / "domains" / "retail" / "capabilities" / "sandbox_only"
+    sbx_cap.mkdir(parents=True)
+    with open(sbx_cap / "databricks.yml", "w", encoding="utf-8") as f:
+        yaml.dump(
+            {"bundle": {"name": "sbx"}, "targets": {"sandbox": {"default": True}}},
+            f,
+        )
+
+    step = next(
+        s
+        for s in workflow()["jobs"]["select-and-check"]["steps"]
+        if s["name"] == "Select affected Bundles"
+    )
+    mutated_script = step["run"].replace("--target dev", "")
+    assert "--target dev" not in mutated_script
+
+    paths_file = tmp_path / "changed-paths.txt"
+    paths_file.write_text("domains/retail/capabilities/sandbox_only/specs/jobs.yml\n")
+    output_file = tmp_path / "outputs.txt"
+
+    adapted = mutated_script.replace("/tmp/", str(tmp_path) + "/")
+    proc = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", adapted],
+        cwd=repo_dir,
+        env={
+            **os.environ,
+            "GITHUB_OUTPUT": str(output_file),
+            "EF_LAB_PAUSE": "false",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0
+    leaked_bundles = (tmp_path / "affected-bundles.txt").read_text().splitlines()
+    # Removing --target dev causes the sandbox-only bundle to leak into deployment
+    assert "domains/retail/capabilities/sandbox_only" in leaked_bundles
+
+
 def _get_step_run(name: str) -> str:
     steps = workflow()["jobs"]["deploy-dev"]["steps"]
     for step in steps:

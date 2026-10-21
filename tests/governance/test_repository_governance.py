@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -106,6 +107,16 @@ def test_excessive_prod_grant_fixture_is_detected():
     assert violations == fixture["grants"]
 
 
+MANDATORY_FIELD_PATTERNS = (
+    ("Capability afectada", r"Capability[ \t]+afectada"),
+    ("Technical Owner", r"Technical[ \t]+Owner"),
+    ("Data Owner", r"Data[ \t]+Owner"),
+    ("Fecha efectiva", r"(?:Fecha[ \t]+efectiva(?:[ \t]+del[ \t]+cambio)?|Fecha[ \t]+de[ \t]+retiro)"),
+    ("Activo de reemplazo", r"(?:Activo[ \t]+de[ \t]+reemplazo(?:[ \t]+propuesto)?|Reemplazo)"),
+    ("Política de retención", r"Pol[íi]tica[ \t]+de[ \t]+retenci[óo]n(?:[ \t]+aplicable)?"),
+)
+
+
 def is_deprecation_checklist_complete(checklist_text: str) -> bool:
     """Validates that all required fields and confirmations are present
     in a deprecation checklist.
@@ -132,17 +143,16 @@ def is_deprecation_checklist_complete(checklist_text: str) -> bool:
     if placeholder_pattern.search(checklist_text):
         return False
 
-    # Mandatory fields must be present and have a non-empty value
-    mandatory_field_patterns = (
-        r"Capability afectada:\s*\S+",
-        r"Technical Owner:\s*\S+",
-        r"Data Owner:\s*\S+",
-        r"(?:Fecha efectiva|Fecha de retiro).*:\s*\S+",
-        r"(?:reemplazo|Reemplazo).*:\s*\S+",
-        r"(?:política de retención|Política de retención).*:\s*\S+",
-    )
-    for pat in mandatory_field_patterns:
-        if not re.search(pat, checklist_text, re.IGNORECASE):
+    # Mandatory fields must be present and each must have a non-empty value on its line
+    for _, key_pattern in MANDATORY_FIELD_PATTERNS:
+        line_pattern = re.compile(
+            rf"^[ \t]*[-*]?[ \t]*{key_pattern}[ \t]*:[ \t]*(?P<val>[^\r\n]*)$",
+            re.IGNORECASE | re.MULTILINE,
+        )
+        matches = list(line_pattern.finditer(checklist_text))
+        if not matches:
+            return False
+        if not all(m.group("val").strip() for m in matches):
             return False
 
     return True
@@ -180,44 +190,75 @@ def test_deprecation_checklist_rejects_missing_mandatory_fields():
     assert not is_deprecation_checklist_complete(incomplete_sample)
 
 
+SYNTHETIC_COMPLETE_CHECKLIST = """
+# Checklist de deprecación sintético completo
+
+## 1. Identidad del Activo
+- Capability afectada: synthetic_capability
+- Tablas y recursos gobernados involucrados: retail_sbx_a001.silver.synthetic_table
+- Jobs y workflows asociados: synthetic_job
+- Technical Owner: synthetic_tech_owner
+- Data Owner: synthetic_data_owner
+- Estado actual: active
+- Estado propuesto: deprecated
+- Fecha efectiva del cambio: 2026-11-01
+- Activo de reemplazo propuesto: retail_sbx_a001.silver.synthetic_replacement
+- Política de retención aplicable: POL-RET-SYNTHETIC-30D
+- Release / commit Git: abc1234
+
+## 2. Consumidores y Dependencias Downstream
+- [x] Lineage verificado
+- [x] Consumidores notificados
+- [x] Activo de reemplazo validado: retail_sbx_a001.silver.synthetic_replacement
+
+## 3. Controles Operativos
+- [x] Schedule pausado
+- [x] Alertas actualizadas
+- [x] Preservación de batches previa
+
+## 4. Datos y Políticas de Retención
+- [x] Política de retención formalizada: POL-RET-SYNTHETIC-30D
+- [x] Tipo de almacenamiento verificado
+- [x] Prohibición de borrado prematuro
+
+## 5. Cierre y Aprobación
+- [x] Bloqueo de acceso configurado
+- [x] Evidencia de auditoría archivada
+- [x] Aprobación formal registrada
+"""
+
+MANDATORY_DEPRECATION_FIELD_LINES = (
+    ("Capability afectada", "- Capability afectada: synthetic_capability"),
+    ("Technical Owner", "- Technical Owner: synthetic_tech_owner"),
+    ("Data Owner", "- Data Owner: synthetic_data_owner"),
+    ("Fecha efectiva", "- Fecha efectiva del cambio: 2026-11-01"),
+    ("Activo de reemplazo", "- Activo de reemplazo propuesto: retail_sbx_a001.silver.synthetic_replacement"),
+    ("Política de retención", "- Política de retención aplicable: POL-RET-SYNTHETIC-30D"),
+)
+
+
+@pytest.mark.parametrize("field_name,line", MANDATORY_DEPRECATION_FIELD_LINES)
+def test_deprecation_checklist_rejects_each_missing_field(field_name, line):
+    checklist = SYNTHETIC_COMPLETE_CHECKLIST.replace(line + "\n", "")
+    assert is_deprecation_checklist_complete(checklist) is False
+
+
+@pytest.mark.parametrize("field_name,line", MANDATORY_DEPRECATION_FIELD_LINES)
+def test_deprecation_checklist_rejects_each_empty_field(field_name, line):
+    prefix = line.split(":")[0] + ":"
+    checklist = SYNTHETIC_COMPLETE_CHECKLIST.replace(line, prefix)
+    assert is_deprecation_checklist_complete(checklist) is False
+
+
+@pytest.mark.parametrize("field_name,line", MANDATORY_DEPRECATION_FIELD_LINES)
+def test_deprecation_checklist_rejects_each_whitespace_field(field_name, line):
+    prefix = line.split(":")[0] + ":    "
+    checklist = SYNTHETIC_COMPLETE_CHECKLIST.replace(line, prefix)
+    assert is_deprecation_checklist_complete(checklist) is False
+
+
 def test_synthetic_complete_deprecation_checklist_is_accepted():
-    synthetic_complete = """
-    # Checklist de deprecación sintético completo
-
-    ## 1. Identidad del Activo
-    - Capability afectada: synthetic_capability
-    - Tablas y recursos gobernados involucrados: retail_sbx_a001.silver.synthetic_table
-    - Jobs y workflows asociados: synthetic_job
-    - Technical Owner: synthetic_tech_owner
-    - Data Owner: synthetic_data_owner
-    - Estado actual: active
-    - Estado propuesto: deprecated
-    - Fecha efectiva del cambio: 2026-11-01
-    - Activo de reemplazo propuesto: retail_sbx_a001.silver.synthetic_replacement
-    - Política de retención aplicable: POL-RET-SYNTHETIC-30D
-    - Release / commit Git: abc1234
-
-    ## 2. Consumidores y Dependencias Downstream
-    - [x] Lineage verificado
-    - [x] Consumidores notificados
-    - [x] Activo de reemplazo validado: retail_sbx_a001.silver.synthetic_replacement
-
-    ## 3. Controles Operativos
-    - [x] Schedule pausado
-    - [x] Alertas actualizadas
-    - [x] Preservación de batches previa
-
-    ## 4. Datos y Políticas de Retención
-    - [x] Política de retención formalizada: POL-RET-SYNTHETIC-30D
-    - [x] Tipo de almacenamiento verificado
-    - [x] Prohibición de borrado prematuro
-
-    ## 5. Cierre y Aprobación
-    - [x] Bloqueo de acceso configurado
-    - [x] Evidencia de auditoría archivada
-    - [x] Aprobación formal registrada
-    """
-    assert is_deprecation_checklist_complete(synthetic_complete) is True
+    assert is_deprecation_checklist_complete(SYNTHETIC_COMPLETE_CHECKLIST) is True
 
 
 def test_deprecation_checklist_rejects_missing_owner():

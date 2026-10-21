@@ -8,12 +8,13 @@ Este documento consolida el inventario formal de componentes compartidos desarro
 
 El **runtime compartido** proporciona las primitivas de ejecución y utilidades comunes empaquetadas en la librería base de la plataforma:
 
+- `src/enterprise_fabric/`:
+  - `capability_names.py`: Validación y normalización canónica de identificadores de capabilities del dominio.
+  - `cli.py`: Entrypoint ejecutado por Databricks Jobs que emite evidencia en formato JSON de la ejecución del wheel instalado en el cluster (distribución, versión, ruta del módulo y validación de capability), sin actuar como despachador de pipelines ETL.
 - `src/enterprise_fabric/shared/`:
   - `spark.py`: Primitivas funcionales para transformaciones Spark, incluyendo `normalized_text` (limpieza de espacios y conversión de strings vacíos a nulos) y `deterministic_latest` (deduplicación determinista por claves y recencia preservando claves incompletas para evaluación de reglas de calidad). La inicialización y gestión de la sesión Spark es delegada al runtime de Databricks o a fixtures locales de prueba.
   - `delta.py`: Primitiva de publicación atómica `replace_where_value` sobre tablas Delta utilizando el predicado selectivo `replaceWhere` y registrando metadatos de auditoría explícitos mediante `userMetadata`.
   - `identifiers.py`: Validación estricta de cadenas de identificación (`require_safe_value`) mediante expresiones regulares para garantizar valores seguros en rutas, nombres, predicados y metadatos de ejecución.
-  - `enterprise_fabric/capability_names.py`: Validación y normalización canónica de identificadores de capabilities del dominio.
-  - `enterprise_fabric/cli.py`: Entrypoint unificado de línea de comandos para invocaciones de la librería.
 
 ---
 

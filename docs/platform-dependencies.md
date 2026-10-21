@@ -124,7 +124,17 @@ Estos tags constituyen una taxonomía de laboratorio aprobada por el propietario
 
 - **Propietario del Laboratorio, Administrador de Plataforma y Autor (`becavas`)**: El alumno y propietario (`bcastillo@techdic.onmicrosoft.com`) es el autor del código, administrador responsable de la plataforma del laboratorio y titular del rol `account_admin` en Databricks (con facultad implícita `ASSIGN` sobre tags gobernados). Autoriza las operaciones y mantiene los recursos.
 - **Identidad Revisora GitHub en Simulación (`becavas83`)**: Cuenta secundaria del operador utilizada para la revisión formal de Pull Requests y la aprobación obligatoria de compuertas de despliegue (Environment `prod`). Cuenta con permiso `write` verificado en el repositorio. Se documenta formalmente conforme a Fase 15 §2.1 y §10.1 que **una persona operando dos cuentas representa una emulación técnica y no demuestra segregación humana real ni mínimo privilegio estricto**.
-- **Estado de Protecciones de Rama `main`**: El archivo `.github/CODEOWNERS` y la solicitud de revisión a `becavas83` en la PR preparatoria (#31) no demuestran por sí mismos que los controles de rama protegida en `main` estén ya activos. La configuración de revisión obligatoria por code owners (al menos 1 aprobación), descarte de aprobaciones obsoletas tras nuevos commits (`dismiss_stale_reviews`), aprobación del último push revisable y resolución obligatoria de conversaciones permanecen **pendientes de activación por el Administrador** una vez integrada formalmente esta PR preparatoria.
+- **Estado de Protecciones de Rama `main` (Integradas y Comprobadas)**:
+  La PR preparatoria #31 fue aprobada formalmente por `becavas83` sobre el commit `2153721ba505d9fd30f5a12c850ccc9b9610ff98` e integrada en `main` (`74754a244abeaae8295ab2256c0ed90b00d60cbe`) el 2026-10-20. El despliegue automático a DEV (Run ID `39504376658`) confirmó el despliegue de las 5 raíces existentes con el wheel inmutable `c0f4874c2677b282312f6fa0edfe09987cb6a531ae58df791e0d4ff1c3fecb09`.
+  Posteriormente, el Administrador activó y verificó las reglas de protección de rama sobre `main`:
+  - 1 aprobación obligatoria de Code Owner (`require_code_owner_reviews: true`, `required_approving_review_count: 1`).
+  - Descarte de aprobaciones obsoletas tras nuevos commits (`dismiss_stale_reviews: true`).
+  - Aprobación requerida sobre el último push (`require_last_push_approval: true`).
+  - Resolución obligatoria de conversaciones (`required_conversation_resolution: true`).
+  - Aplicación estricta a administradores (`enforce_admins: true`).
+  - Check de calidad estricto requerido (`engineering-quality`, App ID 15368).
+  - Bloqueo de force pushes y eliminación de rama.
+  El bloqueo efectivo de revisión fue comprobado empíricamente mediante la PR negativa #32 en `ops/governance/`, la cual permaneció bloqueada sin aprobación aún tras aprobar CI y fue cerrada sin merge.
 - **Herramienta de Asistencia e Implementación (Antigravity)**: Asistente técnico de IA para desarrollo de código, pruebas, verificación y recolección de evidencias. Opera como herramienta de soporte técnico del alumno; no asume autoría humana, ownership ni rol de aprobación.
 - **Evaluador Técnico y Auditor del Curso (Codex)**: Mantiene la guía oficial del curso y evalúa técnicamente las evidencias de la fábrica antes de decisiones de gate y fusiones en `main`. No es el owner administrativo de la infraestructura ni persona de guardia de operaciones.
 - Canales corporativos no acreditados (ej. `#data-platform-soporte`), guardias de operaciones rotativas y comités de gobernanza corporativos quedan marcados como **pendientes de acreditación corporativa externa**.

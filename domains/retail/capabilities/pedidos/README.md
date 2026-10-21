@@ -1,86 +1,72 @@
 # Capability retail/pedidos
 
-## Propósito y ownership
+## Propósito
 
-- Propósito: publicar pedidos e items recibidos desde `pedidos_source` en Bronze trazable y Silver conformada con calidad observable.
-- Owner de datos: `retail-data-governance`.
-- Owner técnico: `retail-data-engineering`.
-- Soporte de plataforma: consultar `docs/platform-dependencies.md`.
+Publicar pedidos e items recibidos desde `landing.pedidos_source` hacia Bronze trazable y Silver conformada con calidad observable y deduplicación intra-batch determinista.
+
+## Ownership
+
+- Data Owner: `becavas` (autor, platform owner y laboratorio aprobado en simulación; ref: `docs/platform-dependencies.md`).
+- Technical Owner: `becavas` (Data Engineering Retail).
+- Revisor GitHub: `becavas83` (Identidad Revisora en simulación con permiso write).
+- Operación y Soporte: `becavas` (consulte `docs/platform-dependencies.md` y `docs/operations/retail-runbook.md`).
+
+## Clasificación y acceso
+
+- Clasificación: `internal` para datos transaccionales de pedidos; `restricted` para metadatos o atributos sensibles si aplican.
+- Consumo esperado: Capability downstream `ventas` y pipelines analíticos autorizados.
+- Acceso: Administrado centralmente en Unity Catalog (`retail_sbx_a001` en sandbox; service principals en ambientes compartidos).
 
 ## Entradas
 
 | Dataset | Ruta lógica | Formato | Garantía |
 |---|---|---|---|
-| Pedidos | `pedidos/batch_id=<batch_id>` | CSV con header | batch inmutable al declararse listo |
-| Items | `pedido_items/batch_id=<batch_id>` | CSV con header | mismo batch lógico que pedidos |
+| Pedidos | `pedidos/batch_id=<batch_id>` | CSV con header | Batch inmutable al declararse listo |
+| Items | `pedido_items/batch_id=<batch_id>` | CSV con header | Mismo batch lógico que pedidos |
 
 Volume físico de sandbox: `retail_sbx_a001.landing.pedidos_source`.
 
-## Salidas Bronze
+## Salidas y grano
 
-| Tabla | Grano Bronze | Estrategia |
+| Tabla | Capa | Grano | Estrategia |
+|---|---|---|---|
+| `bronze.pedidos_raw` | Bronze | Fila recibida por pedido y archivo | Reemplazo selectivo por batch (`replaceWhere`) |
+| `bronze.pedido_items_raw` | Bronze | Fila recibida por item y archivo | Reemplazo selectivo por batch (`replaceWhere`) |
+| `silver.pedidos_curated` | Silver | (`pedido_id`, `_source_batch_id`) | Deduplicación intra-batch determinista |
+| `silver.pedido_items_curated` | Silver | (`pedido_id`, `item_id`, `_source_batch_id`) | Deduplicación intra-batch determinista |
+| `silver.pedidos_quarantine` | Silver | Registro rechazado + `_quality_run_id` | Preservación de payload y reglas violadas |
+| `silver.pedidos_quality_metrics` | Silver | Regla + entidad + `quality_run_id` | Conteos y estado por ejecución |
+
+## Garantías verificables
+
+<!-- guarantees:start -->
+| ID | Garantía | Comportamiento |
 |---|---|---|
-| `bronze.pedidos_raw` | una fila recibida por pedido y archivo | reemplazo selectivo por batch |
-| `bronze.pedido_items_raw` | una fila recibida por item y archivo | reemplazo selectivo por batch |
+| `PED-BR-001` | Ingesta Bronze estructurada | FAILFAST en lectura CSV con schema explícito. |
+| `PED-BR-002` | Reproceso idempotente | Reemplazo exacto por `batch_id` sin duplicar filas. |
+| `PED-SI-001` | Obligatoriedad de claves | `pedido_id`, `item_id` nulos o inválidos van a quarantine o abortan curated. |
+| `PED-SI-002` | Moneda y montos válidos | Validación de montos no negativos y monedas permitidas. |
+| `PED-SI-003` | Deduplicación determinista | Mayor recencia o criterio de desempate determinista. |
+| `PED-SI-004` | Integridad referencial item-pedido | Items sin cabecera de pedido van a cuarentena. |
+<!-- guarantees:end -->
 
-Bronze no garantiza unicidad de claves ni validez semántica. Conserva campos fuente como string y añade metadata técnica.
+## Operación
 
-## Salidas Silver
+- Spec declarativa de automatización: [`specs/jobs.yml`](specs/jobs.yml).
+- Recurso generado para Databricks Asset Bundles: [`resources/jobs.generated.yml`](resources/jobs.generated.yml).
+- Generación de recursos Bundle:
+  ```bash
+  python -m tools.bundle_generator generate --spec domains/retail/capabilities/pedidos/specs/jobs.yml
+  ```
+- Despliegue y ejecución en sandbox:
+  ```bash
+  databricks bundle validate --target sandbox --profile sandbox
+  databricks bundle deploy --target sandbox --profile sandbox
+  databricks bundle run pedidos_e2e_job --target sandbox --profile sandbox -- --batch_id=training_001
+  ```
+- Diagnóstico y rollback: Consulte `docs/operations/retail-runbook.md`.
 
-| Tabla | Grano | Uso |
-|---|---|---|
-| `silver.pedidos_curated` | pedido + batch | pedidos tipados que cumplen reglas |
-| `silver.pedido_items_curated` | pedido + item + batch | items tipados que cumplen reglas |
-| `silver.pedidos_quarantine` | registro rechazado + quality run | payload y reglas violadas |
-| `silver.pedidos_quality_metrics` | regla + entidad + quality run | conteos observados por ejecución |
+## Lifecycle
 
-Silver deduplica dentro de cada batch. No representa todavía el estado global vigente entre batches.
-
-## Operación inicial (Bronze únicamente)
-
-```bash
-cd domains/retail/capabilities/pedidos
-databricks bundle validate --target sandbox --profile sandbox
-databricks bundle deploy --target sandbox --profile sandbox
-databricks bundle run pedidos_bronze_job --target sandbox --profile sandbox \
-  -- --batch_id=training_001 --fail_after_pedidos=false
-```
-
-Reprocesar el mismo batch reemplaza sus filas; no lo duplica. Las dos tablas se publican mediante transacciones independientes. Ante un fallo parcial, corregir la causa y repetir el mismo `batch_id`.
-
-## Ejecución E2E (Bronze + Silver)
-
-```bash
-cd domains/retail/capabilities/pedidos
-databricks bundle run pedidos_e2e_job --target sandbox --profile sandbox \
-  -- --batch_id=training_001 --fail_after_pedidos=false
-```
-
-El Job usa classic job compute compartido únicamente por sus tasks durante el run (`pedidos_shared_job_compute`).
-Una regla `FAIL` conserva métricas y quarantine, no publica curated y termina la task con error (`QualityGateError`).
-
-## Evidencia mínima
-
-- URL y run ID del Job.
-- Run ID y estado de ambas tasks (`ingest_pedidos_bronze`, `publish_pedidos_silver`).
-- Batch ID y conteos Silver (`pedidos_curated`, `pedido_items_curated`).
-- Métricas por regla en `pedidos_quality_metrics`.
-- Cantidad y rule IDs de quarantine en `pedidos_quarantine`.
-- `_record_hash` y archivos fuente observados.
-- Versión Delta y `userMetadata` de cada salida.
-- Resultado del reproceso idempotente.
-
-## Contrato de automatización
-
-- Spec: [`specs/jobs.yml`](specs/jobs.yml).
-- Recurso desplegable: [`resources/jobs.generated.yml`](resources/jobs.generated.yml).
-- Schema y reglas: [`tools/bundle_generator`](../../../../../tools/bundle_generator).
-- Estándar: [`docs/standards/bundle-job-specs.md`](../../../../../docs/standards/bundle-job-specs.md).
-
-```bash
-python -m tools.bundle_generator generate --spec \
-  domains/retail/capabilities/pedidos/specs/jobs.yml
-python -m tools.bundle_generator generate --all --check
-```
-
-`jobs.generated.yml` se revisa y versiona, pero no se edita manualmente.
+- Estado actual: `active`.
+- Transiciones: Cambios de estado (`proposed` -> `active` -> `deprecated` -> `retired`) requieren PR aprobada por code owner, verificación de dependencias downstream (`ventas`) y cumplimiento de `docs/operations/deprecation-checklist.md`.

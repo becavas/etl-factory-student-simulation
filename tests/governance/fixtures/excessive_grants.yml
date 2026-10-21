@@ -1,0 +1,6 @@
+grants:
+  - environment: prod
+    object: retail_prod.gold.agg_ventas_netas_diarias
+    principal_type: user
+    principal: analyst@example.com
+    privilege: MODIFY

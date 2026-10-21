@@ -1,77 +1,71 @@
 # Capability retail/clientes
 
-## Propósito y ownership
+## Propósito
 
-- Propósito: publicar clientes sintéticos tipados y trazables desde Landing hasta Silver.
-- Owner de datos: `retail-data-governance` (@becavas).
-- Owner técnico: `retail-data-engineering` (@becavas).
-- Soporte de plataforma: consultar `docs/platform-dependencies.md`.
+Publicar el catálogo maestro de clientes sintéticos tipados, deduplicados y trazables desde Landing hasta Silver en Unity Catalog (`retail_sbx_a001`).
 
-## Clasificación
+## Ownership
 
-Contiene datos personales: nombres, apellidos, email y fecha de nacimiento. Los datasets de
-capacitación son sintéticos. Bronze y quarantine requieren acceso y retención restringidos.
+- Data Owner: `becavas` (autor, platform owner y laboratorio aprobado en simulación; ref: `docs/platform-dependencies.md`).
+- Technical Owner: `becavas` (Data Engineering Retail).
+- Revisor GitHub: `becavas83` (Identidad Revisora en simulación con permiso write).
+- Operación y Soporte: `becavas` (consulte `docs/platform-dependencies.md` y `docs/operations/retail-runbook.md`).
 
-## Entrada
+## Clasificación y acceso
+
+- Clasificación: `confidential` a nivel de tabla; columna `email` clasificada como `restricted` (datos personales sintéticos sujetos a políticas corporativas).
+- Consumo esperado: Capability downstream `ventas` (para conformación dimensional) y procesos analíticos autorizados.
+- Acceso: Administrado centralmente en Unity Catalog (`retail_sbx_a001` en sandbox; service principals en ambientes compartidos).
+
+## Entradas
 
 | Dataset | Ruta lógica | Formato | Garantía |
 |---|---|---|---|
-| clientes | `clientes/batch_id=<batch_id>` | CSV con header | batch completo e inmutable al declararse listo |
+| Clientes | `clientes/batch_id=<batch_id>` | CSV con header | Batch inmutable al declararse listo |
 
-Volume sandbox: `retail_sbx_a001.landing.clientes_source`.
+Volume físico de sandbox: `retail_sbx_a001.landing.clientes_source`.
 
-## Salidas
+## Salidas y grano
 
-| Tabla | Grano | Uso |
-|---|---|---|
-| `bronze.clientes_raw` | fila fuente | preservación y lineage |
-| `silver.clientes_curated` | cliente + batch | registro tipado, deduplicado y válido |
-| `silver.clientes_quarantine` | registro + quality run | payload y reglas violadas |
-| `silver.clientes_quality_metrics` | regla + quality run | evidencia por ejecución |
-
-Silver deduplica dentro del batch; no representa todavía el cliente vigente entre batches.
+| Tabla | Capa | Grano | Uso |
+|---|---|---|---|
+| `bronze.clientes_raw` | Bronze | Fila fuente recibida | Preservación cruda y lineage técnico |
+| `silver.clientes_curated` | Silver | (`cliente_id`, `_source_batch_id`) | Registro tipado, deduplicado y validado |
+| `silver.clientes_quarantine` | Silver | Fila rechazada + `quality_run_id` | Payload crudo y reglas de validación violadas |
+| `silver.clientes_quality_metrics` | Silver | Regla + `quality_run_id` | Evidencia de calidad y métricas por ejecución |
 
 ## Garantías verificables
 
 <!-- guarantees:start -->
 | ID | Garantía |
 |---|---|
-| `CLI-001` | Bronze conserva las ocho columnas fuente como string y agrega lineage mínimo. |
-| `CLI-002` | Reprocesar un batch reemplaza solo ese batch. |
-| `CLI-003` | Silver normaliza strings vacíos y tipa fechas/timestamps de forma tolerante. |
+| `CLI-001` | Bronze conserva columnas fuente como string y agrega lineage técnico. |
+| `CLI-002` | Reprocesar un batch reemplaza exactamente las particiones del batch sin afectar otros lotes. |
+| `CLI-003` | Silver normaliza strings vacíos y tipa fechas y timestamps de forma tolerante. |
 | `CLI-004` | Un duplicado conserva el registro con mayor recencia y desempate determinista. |
-| `CLI-005` | El email se normaliza a minúsculas y un formato inválido va a quarantine. |
+| `CLI-005` | El email se normaliza a minúsculas y formato inválido va a quarantine. |
 | `CLI-006` | Fecha de nacimiento futura, país inválido y estado desconocido van a quarantine. |
-| `CLI-007` | ID o timestamp obligatorio inválido persiste evidencia y falla Silver. |
+| `CLI-007` | ID o timestamp obligatorio inválido persiste evidencia y falla Silver (`QualityGateError`). |
 | `CLI-008` | Métricas y quarantine conservan batch, quality run y lineage fuente. |
 <!-- guarantees:end -->
 
-Agregar o retirar una garantía exige actualizar sus tests. Cambiar su significado requiere un ID
-nuevo o una decisión explícita revisada por el owner.
+## Operación
 
-## Automatización
-
-- Spec: [`specs/jobs.yml`](specs/jobs.yml).
+- Spec declarativa: [`specs/jobs.yml`](specs/jobs.yml).
 - Recurso generado: [`resources/jobs.generated.yml`](resources/jobs.generated.yml).
-- Estándar: [`docs/standards/bundle-job-specs.md`](../../../../../docs/standards/bundle-job-specs.md).
+- Generación y validación:
+  ```bash
+  python -m tools.bundle_generator generate --spec domains/retail/capabilities/clientes/specs/jobs.yml
+  ```
+- Despliegue y ejecución:
+  ```bash
+  databricks bundle validate --target sandbox --profile sandbox
+  databricks bundle deploy --target sandbox --profile sandbox
+  databricks bundle run clientes_e2e_job --target sandbox --profile sandbox -- --batch_id=training_001
+  ```
+- Diagnóstico y rollback: Consulte `docs/operations/retail-runbook.md`.
 
-## Ejecución
+## Lifecycle
 
-```bash
-cd domains/retail/capabilities/clientes
-databricks bundle validate --target sandbox --profile sandbox
-databricks bundle deploy --target sandbox --profile sandbox
-databricks bundle run clientes_e2e_job --target sandbox --profile sandbox \
-  -- --batch_id=training_001
-```
-
-Una regla `FAIL` conserva métricas y quarantine y evita publicar curated.
-
-## Evidencia mínima
-
-- commit, PR, Job URL y run ID;
-- batch y conteos Bronze/Silver;
-- métricas y quarantine del quality run;
-- versiones Delta y `userMetadata`;
-- reproceso idempotente;
-- prueba negativa y owners que recibieron review.
+- Estado actual: `active`.
+- Transiciones: Cambios de estado (`proposed` -> `active` -> `deprecated` -> `retired`) requieren PR aprobada por code owner, verificación de consumidores (`ventas`) y registro conforme a `docs/operations/deprecation-checklist.md`.

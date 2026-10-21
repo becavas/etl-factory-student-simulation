@@ -1,0 +1,45 @@
+bundle:
+  name: retail_devoluciones
+  databricks_cli_version: "1.12.*"
+
+include:
+  - resources/*.generated.yml
+
+sync:
+  paths:
+    - ../../../../src
+    - .
+
+artifacts:
+  default:
+    type: whl
+    build: python scripts/prepare_bundle_artifact.py
+    path: ../../../..
+
+variables:
+  git_sha:
+    description: Commit exacto desplegado por CI/CD.
+    default: local-uncommitted
+  catalog:
+    description: Catálogo del dominio retail para el ambiente sandbox.
+    default: retail_sbx_a001
+  source_volume_path:
+    description: Ruta del Volume gobernado de devoluciones en sandbox.
+    default: /Volumes/retail_sbx_a001/landing/devoluciones_source
+  policy_id:
+    description: ID de la compute policy aprobada para sandbox.
+    default: "0014E7B094CA30EB"
+  spark_version:
+    description: DBR 16.4 LTS aprobado por Data Platform.
+    default: 16.4.x-scala2.12
+  node_type_id:
+    description: Node type pequeño permitido por la policy.
+    default: Standard_F4s_v2
+
+targets:
+  sandbox:
+    mode: development
+    default: true
+    workspace:
+      profile: sandbox
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

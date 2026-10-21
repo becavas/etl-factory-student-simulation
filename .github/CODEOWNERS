@@ -38,6 +38,10 @@
 /src/enterprise_fabric/retail/ventas/ @becavas83
 /tests/retail/ventas/ @becavas83
 
+/domains/retail/capabilities/devoluciones/ @becavas83
+/src/enterprise_fabric/retail/devoluciones/ @becavas83
+/tests/retail/devoluciones/ @becavas83
+
 # Shared primitives
 /src/enterprise_fabric/shared/ @becavas83
 /tests/shared/ @becavas83

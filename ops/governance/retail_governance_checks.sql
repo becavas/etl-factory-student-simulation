@@ -43,8 +43,8 @@ ORDER BY table_catalog, table_schema, table_name;
 -- 2. Inventario de Privilegios y Grants (§13)
 -- ------------------------------------------------------------------------------
 -- Evalúa privilegios directos y heredados por catálogo y schema.
--- INFORMATION_SCHEMA es privilege-aware: para un owner de catálogo/admin devuelve
--- 0 filas explícitas porque opera bajo facultades implícitas de ownership.
+-- Nota de observación: 0 filas es un resultado observado de esta consulta acotada, sujeto
+-- a la visibilidad y alcance evaluado; no excluye grants directos asignados a otros objetos o principales.
 SELECT table_catalog,
        table_schema,
        table_name,

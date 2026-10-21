@@ -111,7 +111,10 @@ MANDATORY_FIELD_PATTERNS = (
     ("Capability afectada", r"Capability[ \t]+afectada"),
     ("Technical Owner", r"Technical[ \t]+Owner"),
     ("Data Owner", r"Data[ \t]+Owner"),
-    ("Fecha efectiva", r"(?:Fecha[ \t]+efectiva(?:[ \t]+del[ \t]+cambio)?|Fecha[ \t]+de[ \t]+retiro)"),
+    (
+        "Fecha efectiva",
+        r"(?:Fecha[ \t]+efectiva(?:[ \t]+del[ \t]+cambio)?|Fecha[ \t]+de[ \t]+retiro)",
+    ),
     ("Activo de reemplazo", r"(?:Activo[ \t]+de[ \t]+reemplazo(?:[ \t]+propuesto)?|Reemplazo)"),
     ("Política de retención", r"Pol[íi]tica[ \t]+de[ \t]+retenci[óo]n(?:[ \t]+aplicable)?"),
 )
@@ -232,7 +235,10 @@ MANDATORY_DEPRECATION_FIELD_LINES = (
     ("Technical Owner", "- Technical Owner: synthetic_tech_owner"),
     ("Data Owner", "- Data Owner: synthetic_data_owner"),
     ("Fecha efectiva", "- Fecha efectiva del cambio: 2026-11-01"),
-    ("Activo de reemplazo", "- Activo de reemplazo propuesto: retail_sbx_a001.silver.synthetic_replacement"),
+    (
+        "Activo de reemplazo",
+        "- Activo de reemplazo propuesto: retail_sbx_a001.silver.synthetic_replacement",
+    ),
     ("Política de retención", "- Política de retención aplicable: POL-RET-SYNTHETIC-30D"),
 )
 

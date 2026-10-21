@@ -2,7 +2,7 @@
 
 - Estado: Accepted
 - Fecha: 2026-10-20
-- Decisores: Beto Castillo (Platform & Data Owner, simulación aprobada @becavas), Beto Javi Castillo Vásquez (Revisor GitHub @becavas83)
+- Decisores: Beto Castillo Vásquez (operando en simulación de laboratorio de una sola persona las identidades técnicas de autor/administrador @becavas y de revisor GitHub @becavas83; ref: `docs/platform-dependencies.md`)
 
 ## Contexto
 

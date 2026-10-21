@@ -9,11 +9,13 @@ Este checklist establece los controles obligatorios para transicionar una capabi
 - Capability afectada:
 - Tablas y recursos gobernados involucrados:
 - Jobs y workflows asociados:
-- Technical Owner: `becavas` (Data Engineering Retail)
-- Data Owner: `becavas` (Simulación aprobada de laboratorio; ref: `docs/platform-dependencies.md`)
+- Technical Owner:
+- Data Owner:
 - Estado actual:
 - Estado propuesto (`deprecated` / `retired`):
 - Fecha efectiva del cambio:
+- Activo de reemplazo propuesto:
+- Política de retención aplicable:
 - Release / commit Git que formaliza la decisión:
 
 ---

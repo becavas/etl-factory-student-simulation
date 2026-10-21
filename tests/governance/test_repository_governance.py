@@ -114,35 +114,36 @@ def is_deprecation_checklist_complete(checklist_text: str) -> bool:
         "## 1. Identidad",
         "## 2. Consumidores",
         "## 3. Controles Operativos",
-        "## 4. Datos y Políticas de Retención",
-        "## 5. Cierre y Aprobación",
+        "## 4. Datos",
+        "## 5. Cierre",
     )
     for section in required_sections:
         if section not in checklist_text:
             return False
 
-    required_keywords = (
-        "Technical Owner",
-        "Data Owner",
-        "Lineage",
-        "reemplazo",
-        "retención",
+    # Check that there are checkboxes and NO checkbox is left unchecked
+    if "[ ]" in checklist_text:
+        return False
+    if "[x]" not in checklist_text and "[X]" not in checklist_text:
+        return False
+
+    # Prohibit placeholder patterns like <...>
+    placeholder_pattern = re.compile(r"<[^>]+>")
+    if placeholder_pattern.search(checklist_text):
+        return False
+
+    # Mandatory fields must be present and have a non-empty value
+    mandatory_field_patterns = (
+        r"Capability afectada:\s*\S+",
+        r"Technical Owner:\s*\S+",
+        r"Data Owner:\s*\S+",
+        r"(?:Fecha efectiva|Fecha de retiro).*:\s*\S+",
+        r"(?:reemplazo|Reemplazo).*:\s*\S+",
+        r"(?:política de retención|Política de retención).*:\s*\S+",
     )
-    for kw in required_keywords:
-        if kw.lower() not in checklist_text.lower():
+    for pat in mandatory_field_patterns:
+        if not re.search(pat, checklist_text, re.IGNORECASE):
             return False
-
-    # Prohibit unfulfilled/blank placeholders in essential fields
-    blank_field_pattern = re.compile(
-        r"(?:Capability afectada|Technical Owner|Data Owner|Estado propuesto):\s*$",
-        re.MULTILINE,
-    )
-    if blank_field_pattern.search(checklist_text):
-        return False
-
-    # Verify that checkboxes are not all unchecked if claiming completion
-    if "[ ]" in checklist_text and "[x]" not in checklist_text:
-        return False
 
     return True
 
@@ -177,3 +178,147 @@ def test_deprecation_checklist_rejects_missing_mandatory_fields():
     [x] Cierre
     """
     assert not is_deprecation_checklist_complete(incomplete_sample)
+
+
+def test_synthetic_complete_deprecation_checklist_is_accepted():
+    synthetic_complete = """
+    # Checklist de deprecación sintético completo
+
+    ## 1. Identidad del Activo
+    - Capability afectada: synthetic_capability
+    - Tablas y recursos gobernados involucrados: retail_sbx_a001.silver.synthetic_table
+    - Jobs y workflows asociados: synthetic_job
+    - Technical Owner: synthetic_tech_owner
+    - Data Owner: synthetic_data_owner
+    - Estado actual: active
+    - Estado propuesto: deprecated
+    - Fecha efectiva del cambio: 2026-11-01
+    - Activo de reemplazo propuesto: retail_sbx_a001.silver.synthetic_replacement
+    - Política de retención aplicable: POL-RET-SYNTHETIC-30D
+    - Release / commit Git: abc1234
+
+    ## 2. Consumidores y Dependencias Downstream
+    - [x] Lineage verificado
+    - [x] Consumidores notificados
+    - [x] Activo de reemplazo validado: retail_sbx_a001.silver.synthetic_replacement
+
+    ## 3. Controles Operativos
+    - [x] Schedule pausado
+    - [x] Alertas actualizadas
+    - [x] Preservación de batches previa
+
+    ## 4. Datos y Políticas de Retención
+    - [x] Política de retención formalizada: POL-RET-SYNTHETIC-30D
+    - [x] Tipo de almacenamiento verificado
+    - [x] Prohibición de borrado prematuro
+
+    ## 5. Cierre y Aprobación
+    - [x] Bloqueo de acceso configurado
+    - [x] Evidencia de auditoría archivada
+    - [x] Aprobación formal registrada
+    """
+    assert is_deprecation_checklist_complete(synthetic_complete) is True
+
+
+def test_deprecation_checklist_rejects_missing_owner():
+    # Starting from valid synthetic checklist, removing Technical Owner
+    sample = """
+    ## 1. Identidad
+    - Capability afectada: synthetic_capability
+    - Data Owner: synthetic_data_owner
+    - Fecha efectiva: 2026-11-01
+    - Activo de reemplazo: replacement_table
+    - Política de retención: POL-RET-01
+    ## 2. Consumidores
+    - [x] Consumidores confirmados
+    ## 3. Controles Operativos
+    - [x] Operación verificada
+    ## 4. Datos
+    - [x] Datos verificados
+    ## 5. Cierre
+    - [x] Cierre aprobado
+    """
+    assert is_deprecation_checklist_complete(sample) is False
+
+
+def test_deprecation_checklist_rejects_missing_consumer_or_replacement():
+    sample = """
+    ## 1. Identidad
+    - Capability afectada: synthetic_capability
+    - Technical Owner: tech_owner
+    - Data Owner: data_owner
+    - Fecha efectiva: 2026-11-01
+    - Política de retención: POL-RET-01
+    ## 2. Consumidores
+    - [x] Lineage consultado
+    ## 3. Controles Operativos
+    - [x] Operación verificada
+    ## 4. Datos
+    - [x] Datos verificados
+    ## 5. Cierre
+    - [x] Cierre aprobado
+    """
+    assert is_deprecation_checklist_complete(sample) is False
+
+
+def test_deprecation_checklist_rejects_missing_retention_policy():
+    sample = """
+    ## 1. Identidad
+    - Capability afectada: synthetic_capability
+    - Technical Owner: tech_owner
+    - Data Owner: data_owner
+    - Fecha efectiva: 2026-11-01
+    - Activo de reemplazo: replacement_table
+    ## 2. Consumidores
+    - [x] Consumidores confirmados
+    ## 3. Controles Operativos
+    - [x] Operación verificada
+    ## 4. Datos
+    - [x] Datos verificados
+    ## 5. Cierre
+    - [x] Cierre aprobado
+    """
+    assert is_deprecation_checklist_complete(sample) is False
+
+
+def test_deprecation_checklist_rejects_missing_effective_date():
+    sample = """
+    ## 1. Identidad
+    - Capability afectada: synthetic_capability
+    - Technical Owner: tech_owner
+    - Data Owner: data_owner
+    - Activo de reemplazo: replacement_table
+    - Política de retención: POL-RET-01
+    ## 2. Consumidores
+    - [x] Consumidores confirmados
+    ## 3. Controles Operativos
+    - [x] Operación verificada
+    ## 4. Datos
+    - [x] Datos verificados
+    ## 5. Cierre
+    - [x] Cierre aprobado
+    """
+    assert is_deprecation_checklist_complete(sample) is False
+
+
+def test_deprecation_checklist_rejects_partially_marked_counterexample():
+    # Codex counterexample: 1 checkbox checked, remaining unchecked
+    counterexample = read(ROOT / "docs/operations/deprecation-checklist.md")
+    counterexample = counterexample.replace(
+        "- [ ] Lineage de Unity Catalog consultado y verificado (adjuntar timestamp y consulta).",
+        "- [x] Lineage de Unity Catalog consultado y verificado (adjuntar timestamp y consulta).",
+        1,
+    )
+    assert is_deprecation_checklist_complete(counterexample) is False
+
+
+def test_lab_deprecation_checklist_instance_remains_incomplete():
+    instance_path = ROOT / "docs/operations/deprecation-checklist-clientes-governance-lab.md"
+    assert instance_path.exists()
+    text = read(instance_path)
+    assert "retail_sbx_a001.silver.clientes_governance_lab" in text
+    assert "bcastillo@techdic.onmicrosoft.com" in text or "becavas" in text
+    assert "retail_sbx_a001.silver.clientes_curated" in text
+    assert "2026-11-20" in text
+    # The lab instance has explicit pending items and must NOT be marked complete
+    assert is_deprecation_checklist_complete(text) is False

@@ -66,11 +66,11 @@ Tablas Silver consumidas como fuentes upstream gobernadas:
 
 - Spec declarativa: [`specs/jobs.yml`](specs/jobs.yml).
 - Recurso generado: [`resources/jobs.generated.yml`](resources/jobs.generated.yml).
-- Generación de recursos Bundle:
+- Generación de recursos Bundle (ejecutar desde la raíz del repositorio):
   ```bash
   python -m tools.bundle_generator generate --spec domains/retail/capabilities/ventas/specs/jobs.yml
   ```
-- Despliegue y ejecución:
+- Despliegue y validación de Bundle (ejecutar desde el directorio de la capability `domains/retail/capabilities/ventas`, donde se ubica `databricks.yml`):
   ```bash
   databricks bundle validate --target sandbox --profile sandbox
   databricks bundle deploy --target sandbox --profile sandbox

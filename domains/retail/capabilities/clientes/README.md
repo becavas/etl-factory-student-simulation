@@ -53,11 +53,11 @@ Volume físico de sandbox: `retail_sbx_a001.landing.clientes_source`.
 
 - Spec declarativa: [`specs/jobs.yml`](specs/jobs.yml).
 - Recurso generado: [`resources/jobs.generated.yml`](resources/jobs.generated.yml).
-- Generación y validación:
+- Generación y validación (ejecutar desde la raíz del repositorio):
   ```bash
   python -m tools.bundle_generator generate --spec domains/retail/capabilities/clientes/specs/jobs.yml
   ```
-- Despliegue y ejecución:
+- Despliegue y validación de Bundle (ejecutar desde el directorio de la capability `domains/retail/capabilities/clientes`, donde se ubica `databricks.yml`):
   ```bash
   databricks bundle validate --target sandbox --profile sandbox
   databricks bundle deploy --target sandbox --profile sandbox

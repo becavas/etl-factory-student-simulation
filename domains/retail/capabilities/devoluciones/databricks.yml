@@ -28,7 +28,6 @@ variables:
     default: /Volumes/retail_sbx_a001/landing/devoluciones_source
   policy_id:
     description: ID de la compute policy aprobada para sandbox.
-    default: "0014E7B094CA30EB"
   spark_version:
     description: DBR 16.4 LTS aprobado por Data Platform.
     default: 16.4.x-scala2.12

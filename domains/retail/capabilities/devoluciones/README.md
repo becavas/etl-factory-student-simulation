@@ -58,6 +58,9 @@ El alcance de esta capability de onboarding comprende la ingestión Bronze cruda
 
 ## Operación
 
+- Runbook operativo detallado: Consulte el apartado específico en [`docs/operations/retail-runbook.md`](../../../../docs/operations/retail-runbook.md#f-protocolo-operativo-y-de-recuperación-capability-retaildevoluciones-sandbox).
+- Criterio de ejecución operativa: Ventana acotada de **hasta 60 minutos por futuro run sandbox** (definida mediante `timeout_seconds: 1800` por task Bronze y Silver, acotando el pipeline a 3600s). No constituye un SLA productivo ni cuenta con servicios corporativos de alerta automatizada externos; rige el seguimiento del Job y la bitácora auditable de la sesión.
+- Idempotencia lógica gobernada: La garantía de no duplicación y reemplazo exacto se implementa lógicamente mediante predicados selectivos `replaceWhere` (`_ingestion_batch_id` en Bronze y `_source_batch_id` en Silver Curated). No requiere ni afirma particionado físico en disco para satisfacer la idempotencia a nivel de tabla Delta.
 - Spec declarativa: [`specs/jobs.yml`](specs/jobs.yml).
 - Recurso generado: [`resources/jobs.generated.yml`](resources/jobs.generated.yml).
 - Generación y verificación de bundles (ejecutar desde la raíz del repositorio):
@@ -67,6 +70,9 @@ El alcance de esta capability de onboarding comprende la ingestión Bronze cruda
   ```
 - Despliegue y ejecución en sandbox (ejecutar desde `domains/retail/capabilities/devoluciones`):
   ```bash
+  set -a
+  source ../../../../.env.local
+  set +a
   databricks bundle validate --target sandbox
   databricks bundle plan --target sandbox
   databricks bundle deploy --target sandbox
@@ -74,7 +80,7 @@ El alcance de esta capability de onboarding comprende la ingestión Bronze cruda
   ```
 - Gestión de incidencias, alertas y escalamiento:
   - Fallos en Bronze: Task configurada con reintento acotado (1 reintento tras 60s) para mitigar fallos transitorios de red/compute.
-  - Fallos en Silver / DQ: Sin reintento automático ante fallos deterministas. En caso de `QualityGateError`, el Job termina en estado `FAILED`. El operador debe inspeccionar `silver.devoluciones_quality_metrics` y `silver.devoluciones_quarantine`. Si el batch de origen contiene datos inválidos, el lote se declara defectuoso e inmutable; el emisor debe generar y publicar un nuevo batch sucesor corregido.
+  - Fallos en Silver / DQ: Sin reintento automático ante fallos deterministas. En caso de `QualityGateError`, el Job termina en estado `FAILED`. El operador debe inspeccionar `silver.devoluciones_quality_metrics` y `silver.devoluciones_quarantine` (sin exponer `motivo`). Si el batch de origen contiene datos inválidos, el lote se declara defectuoso e inmutable; el emisor debe generar y publicar un nuevo batch sucesor corregido.
   - Escalamiento: Data Engineering Retail (`becavas`) y Data Platform.
 
 ## Lifecycle

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.types import StringType, StructField, StructType
 
 from enterprise_fabric.retail.devoluciones.schemas import (
     DEVOLUCIONES_SOURCE_COLUMNS,
@@ -11,6 +12,10 @@ from enterprise_fabric.retail.devoluciones.schemas import (
 )
 from enterprise_fabric.shared.delta import replace_where_value
 from enterprise_fabric.shared.identifiers import require_safe_value
+
+
+class IngestionError(RuntimeError):
+    """Raised when ingestion fails due to malformed input or missing batches."""
 
 
 @dataclass(frozen=True)
@@ -32,17 +37,36 @@ def read_batch(
     batch_id: str,
     run_id: str,
 ) -> DataFrame:
-    """Read one immutable CSV batch and append technical lineage columns."""
+    """Read one immutable CSV batch and append technical lineage columns.
+
+    Uses PERMISSIVE mode with a dedicated corrupt record column to detect
+    malformed inputs without leaking sensitive column values (such as motivo)
+    into Spark task error logs or stack traces.
+    """
+    schema_with_corrupt = StructType(
+        list(DEVOLUCIONES_SOURCE_SCHEMA.fields)
+        + [StructField("_corrupt_record", StringType(), True)]
+    )
     raw = (
         spark.read.format("csv")
-        .schema(DEVOLUCIONES_SOURCE_SCHEMA)
+        .schema(schema_with_corrupt)
         .option("header", "true")
         .option("enforceSchema", "false")
-        .option("mode", "FAILFAST")
+        .option("mode", "PERMISSIVE")
+        .option("columnNameOfCorruptRecord", "_corrupt_record")
         .option("encoding", "UTF-8")
         .load(path)
     )
     source = F.struct(*(F.col(column) for column in DEVOLUCIONES_SOURCE_COLUMNS))
+    safe_hash = F.when(
+        F.col("_corrupt_record").isNotNull(),
+        F.raise_error(
+            F.lit(
+                f"Malformed CSV record detected during ingestion of batch {batch_id}. "
+                "Raw record content redacted for privacy."
+            )
+        ),
+    ).otherwise(F.sha2(F.to_json(source, {"ignoreNullFields": "false"}), 256))
     return raw.select(
         *DEVOLUCIONES_SOURCE_COLUMNS,
         F.lit(batch_id).alias("batch_id"),
@@ -52,7 +76,7 @@ def read_batch(
         F.lit(batch_id).alias("_ingestion_batch_id"),
         F.lit(run_id).alias("_ingestion_run_id"),
         F.current_timestamp().alias("_ingested_at_utc"),
-        F.sha2(F.to_json(source, {"ignoreNullFields": "false"}), 256).alias("_record_hash"),
+        safe_hash.alias("_record_hash"),
     )
 
 
@@ -92,5 +116,13 @@ def ingest_bronze(
         table_name = f"{catalog}.bronze.devoluciones_raw"
         replace_batch(devoluciones, table_name, batch_id, run_id)
         return BronzeResult(batch_id, run_id, row_count, table_name)
+    except Exception as exc:
+        msg = str(exc)
+        if "Malformed CSV record detected" in msg:
+            raise IngestionError(
+                f"Ingestion failed for batch {batch_id}: malformed records detected in source. "
+                "Raw record content redacted for privacy."
+            ) from None
+        raise
     finally:
         devoluciones.unpersist()

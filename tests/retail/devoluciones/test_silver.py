@@ -167,9 +167,11 @@ def test_fail_rules_increment_fail_count(spark, override, rule_id):
 
 
 def test_referential_integrity_requires_existing_pedido_in_same_batch(spark):
-    prepared = prepare(spark.createDataFrame([_devolucion(pedido_id="PED-UNKNOWN")]))
+    # Order exists globally in pedidos_curated, but in a DIFFERENT batch (2026-08-19).
+    # Devolución belongs to 2026-08-20. This discriminates global existence from batch existence.
+    prepared = prepare(spark.createDataFrame([_devolucion(pedido_id="PED-OTHER-BATCH")]))
     pedidos_curated = spark.createDataFrame(
-        [Row(pedido_id="PED-D15-001", _source_batch_id="2026-08-20")]
+        [Row(pedido_id="PED-OTHER-BATCH", _source_batch_id="2026-08-19")]
     )
     checked, evaluated, fail_count = evaluate(prepared, pedidos_curated, "2026-08-20")
     assert evaluated["devolucion_pedido_exists"] == 1
@@ -236,8 +238,153 @@ def test_publish_silver_raises_quality_gate_error_on_failure(spark):
         ) as mock_replace:
             with pytest.raises(QualityGateError, match="mandatory devoluciones checks"):
                 publish_silver(spark, "sbx", "2026-08-20", "q-run-fail")
-            # Metrics and quarantine should have been persisted before raising
-            assert mock_replace.call_count >= 2
+            # Metrics and quarantine must have been persisted, and curated strictly PROHIBITED
+            target_tables = [call.args[1] for call in mock_replace.call_args_list]
+            assert "sbx.silver.devoluciones_quality_metrics" in target_tables
+            assert "sbx.silver.devoluciones_quarantine" in target_tables
+            assert "sbx.silver.devoluciones_curated" not in target_tables
+            assert mock_replace.call_count == 2
+
+
+def test_silver_real_delta_fail_persists_evidence_and_prohibits_curated(spark):
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.bronze")
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver")
+    for tbl in (
+        "bronze.devoluciones_raw",
+        "silver.pedidos_curated",
+        "silver.devoluciones_curated",
+        "silver.devoluciones_quarantine",
+        "silver.devoluciones_quality_metrics",
+    ):
+        spark.sql(f"DROP TABLE IF EXISTS spark_catalog.{tbl}")
+
+    raw = spark.createDataFrame([_devolucion(estado="INVALID_STATE")])
+    raw.write.format("delta").mode("overwrite").saveAsTable("spark_catalog.bronze.devoluciones_raw")
+
+    pedidos = spark.createDataFrame([Row(pedido_id="PED-D15-001", _source_batch_id="2026-08-20")])
+    pedidos.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver.pedidos_curated"
+    )
+
+    with pytest.raises(QualityGateError, match="mandatory devoluciones checks"):
+        publish_silver(spark, "spark_catalog", "2026-08-20", "q-run-fail")
+
+    # Metrics and quarantine persisted
+    metrics = spark.table("spark_catalog.silver.devoluciones_quality_metrics")
+    quarantine = spark.table("spark_catalog.silver.devoluciones_quarantine")
+    assert metrics.where("quality_run_id = 'q-run-fail' AND action = 'FAIL'").count() >= 1
+    assert quarantine.where("_quality_run_id = 'q-run-fail'").count() == 1
+
+    # Curated MUST NOT be created or published
+    curated_exists = spark.catalog.tableExists("spark_catalog.silver.devoluciones_curated")
+    assert (
+        not curated_exists or spark.table("spark_catalog.silver.devoluciones_curated").count() == 0
+    )
+
+
+def test_silver_real_delta_idempotence_and_preservation_across_runs(spark):
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.bronze")
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.silver")
+    for tbl in (
+        "bronze.devoluciones_raw",
+        "silver.pedidos_curated",
+        "silver.devoluciones_curated",
+        "silver.devoluciones_quarantine",
+        "silver.devoluciones_quality_metrics",
+    ):
+        spark.sql(f"DROP TABLE IF EXISTS spark_catalog.{tbl}")
+
+    # Seed Bronze with batch 2026-08-20 and 2026-08-22
+    b1_records = [
+        _devolucion(
+            devolucion_id="DEV-D15-001",
+            pedido_id="PED-D15-001",
+            _ingestion_batch_id="2026-08-20",
+            _record_hash="1" * 64,
+        ),
+        _devolucion(
+            devolucion_id="DEV-D15-002",
+            pedido_id="PED-D15-002",
+            moneda="EUR",  # Goes to quarantine
+            _ingestion_batch_id="2026-08-20",
+            _record_hash="2" * 64,
+        ),
+    ]
+    b2_records = [
+        _devolucion(
+            devolucion_id="DEV-D15-003",
+            pedido_id="PED-D15-003",
+            _ingestion_batch_id="2026-08-22",
+            _record_hash="3" * 64,
+        ),
+    ]
+    raw_df = spark.createDataFrame(b1_records + b2_records)
+    raw_df.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.bronze.devoluciones_raw"
+    )
+
+    pedidos_df = spark.createDataFrame(
+        [
+            Row(pedido_id="PED-D15-001", _source_batch_id="2026-08-20"),
+            Row(pedido_id="PED-D15-002", _source_batch_id="2026-08-20"),
+            Row(pedido_id="PED-D15-003", _source_batch_id="2026-08-22"),
+        ]
+    )
+    pedidos_df.write.format("delta").mode("overwrite").saveAsTable(
+        "spark_catalog.silver.pedidos_curated"
+    )
+
+    # Run 1 for 2026-08-20
+    res_b1_r1 = publish_silver(spark, "spark_catalog", "2026-08-20", "q-run-b1-1")
+    assert res_b1_r1.curated_count == 1
+    assert res_b1_r1.quarantined_count == 1
+
+    # Run 1 for 2026-08-22 (concurrent/other batch in environment)
+    res_b2 = publish_silver(spark, "spark_catalog", "2026-08-22", "q-run-b2")
+    assert res_b2.curated_count == 1
+
+    # Capture state of batch 2026-08-22 before re-run
+    curated_tbl = spark.table("spark_catalog.silver.devoluciones_curated")
+    b2_curated_before = (
+        curated_tbl.where("_source_batch_id = '2026-08-22'")
+        .select("devolucion_id", "_quality_run_id", "_curated_at_utc")
+        .collect()
+    )
+
+    # Re-run 2026-08-20 with new quality_run_id
+    res_b1_r2 = publish_silver(spark, "spark_catalog", "2026-08-20", "q-run-b1-2")
+    assert res_b1_r2.curated_count == 1
+    assert res_b1_r2.quarantined_count == 1
+
+    # Assertions on post-re-run state:
+    # 1. Batch 2026-08-22 is completely preserved and untouched
+    b2_curated_after = (
+        curated_tbl.where("_source_batch_id = '2026-08-22'")
+        .select("devolucion_id", "_quality_run_id", "_curated_at_utc")
+        .collect()
+    )
+    assert b2_curated_before == b2_curated_after
+
+    # 2. Batch 2026-08-20 in curated: count not doubled, stable deduplication
+    b1_curated = curated_tbl.where("_source_batch_id = '2026-08-20'").collect()
+    assert len(b1_curated) == 1
+    assert b1_curated[0]["devolucion_id"] == "DEV-D15-001"
+    assert b1_curated[0]["_quality_run_id"] == "q-run-b1-2"
+    assert b1_curated[0]["_curated_at_utc"] is not None
+
+    # 3. Both quality runs are preserved in metrics (isolated by quality_run_id)
+    metrics_tbl = spark.table("spark_catalog.silver.devoluciones_quality_metrics")
+    b1_run1_metrics = metrics_tbl.where("quality_run_id = 'q-run-b1-1'").count()
+    b1_run2_metrics = metrics_tbl.where("quality_run_id = 'q-run-b1-2'").count()
+    b2_metrics = metrics_tbl.where("quality_run_id = 'q-run-b2'").count()
+    assert b1_run1_metrics > 0
+    assert b1_run2_metrics > 0
+    assert b2_metrics > 0
+
+    # 4. Both quality runs are preserved in quarantine
+    quarantine_tbl = spark.table("spark_catalog.silver.devoluciones_quarantine")
+    assert quarantine_tbl.where("_quality_run_id = 'q-run-b1-1'").count() == 1
+    assert quarantine_tbl.where("_quality_run_id = 'q-run-b1-2'").count() == 1
 
 
 def test_spec_and_bundle_generator_match():

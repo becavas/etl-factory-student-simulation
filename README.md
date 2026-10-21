@@ -54,6 +54,7 @@ CI no despliega en Databricks ni utiliza credenciales del workspace. Los recurso
 - [Arquitectura de la fábrica](docs/architecture/overview.md)
 - [Estándar de naming](docs/standards/naming.md)
 - [Dependencias de plataforma](docs/platform-dependencies.md)
+- [Runbook operativo del dominio retail](docs/operations/retail-runbook.md)
 
 Verificación read-only de sandbox:
 
@@ -69,3 +70,4 @@ El script no aprovisiona infraestructura. Los recursos faltantes o prohibidos se
 
 - [`retail/pedidos`](domains/retail/capabilities/pedidos/README.md): ingesta de pedidos e items desde Landing hasta Bronze.
 - [`retail/clientes`](domains/retail/capabilities/clientes/README.md): clientes desde Landing hasta Silver.
+- [`retail/devoluciones`](domains/retail/capabilities/devoluciones/README.md): devoluciones gobernadas desde Landing hasta Silver (modo sandbox).

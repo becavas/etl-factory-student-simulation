@@ -46,6 +46,7 @@ GUARANTEE_TEST_MAPPING: dict[str, list[str]] = {
     "DEV-008": [
         "test_motivo_privacy_is_preserved_without_leakage_in_metrics_or_errors",
         "test_malformed_input_preserves_motivo_privacy_across_exception_and_diagnostics",
+        "test_missing_header_preserves_motivo_privacy_across_exception_and_diagnostics",
     ],
     "DEV-009": [
         "test_quality_metrics_and_quarantine_preserve_batch_and_quality_run",

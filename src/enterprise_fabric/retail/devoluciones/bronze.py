@@ -1,5 +1,7 @@
 """Idempotent Bronze ingestion for retail/devoluciones."""
 
+import csv
+import io
 from dataclasses import dataclass
 
 from pyspark.sql import DataFrame, SparkSession
@@ -15,7 +17,7 @@ from enterprise_fabric.shared.identifiers import require_safe_value
 
 
 class IngestionError(RuntimeError):
-    """Raised when ingestion fails due to malformed input or missing batches."""
+    """Raised when ingestion fails due to malformed input, missing headers or missing batches."""
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,34 @@ def validate_identifier(value: str, field: str) -> str:
     return require_safe_value(value, field)
 
 
+def validate_csv_header(spark: SparkSession, path: str, batch_id: str) -> None:
+    """Validate that source CSV contains exactly the declared header columns.
+
+    Checks the first line as text without triggering Spark's CSVHeaderChecker
+    which would print data values to stderr / exception if the header is missing.
+    """
+    try:
+        first_rows = spark.read.text(path).limit(1).collect()
+    except Exception as exc:
+        raise IngestionError(f"Failed to access source path for batch {batch_id}: {exc}") from None
+
+    if not first_rows:
+        raise IngestionError(
+            f"Source batch {batch_id} is empty or missing data files. "
+            "Raw record content redacted for privacy."
+        )
+
+    first_line = first_rows[0][0].lstrip("\ufeff").strip()
+    reader = csv.reader(io.StringIO(first_line))
+    header_cols = [col.strip() for col in next(reader, [])]
+
+    if header_cols != list(DEVOLUCIONES_SOURCE_COLUMNS):
+        raise IngestionError(
+            f"Invalid or missing CSV header in batch {batch_id}. "
+            "Expected declared columns. Raw record content redacted for privacy."
+        )
+
+
 def read_batch(
     spark: SparkSession,
     path: str,
@@ -39,10 +69,12 @@ def read_batch(
 ) -> DataFrame:
     """Read one immutable CSV batch and append technical lineage columns.
 
-    Uses PERMISSIVE mode with a dedicated corrupt record column to detect
-    malformed inputs without leaking sensitive column values (such as motivo)
-    into Spark task error logs or stack traces.
+    Validates header explicitly and uses PERMISSIVE mode with a dedicated
+    corrupt record column to detect malformed inputs without leaking sensitive
+    column values (such as motivo) into Spark task error logs or stack traces.
     """
+    validate_csv_header(spark, path, batch_id)
+
     schema_with_corrupt = StructType(
         list(DEVOLUCIONES_SOURCE_SCHEMA.fields)
         + [StructField("_corrupt_record", StringType(), True)]
@@ -116,6 +148,8 @@ def ingest_bronze(
         table_name = f"{catalog}.bronze.devoluciones_raw"
         replace_batch(devoluciones, table_name, batch_id, run_id)
         return BronzeResult(batch_id, run_id, row_count, table_name)
+    except IngestionError:
+        raise
     except Exception as exc:
         msg = str(exc)
         if "Malformed CSV record detected" in msg:

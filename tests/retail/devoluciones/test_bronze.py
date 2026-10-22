@@ -101,10 +101,17 @@ def test_identifier_rejects_unsafe_values(value):
 
 
 def test_malformed_input_preserves_motivo_privacy_across_exception_and_diagnostics(
-    spark, tmp_path, capsys
+    spark, tmp_path, capfd
 ):
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.bronze")
+    spark.sql(
+        "CREATE TABLE IF NOT EXISTS spark_catalog.bronze.devoluciones_raw "
+        "USING delta AS SELECT 1 WHERE 1=0"
+    )
+    initial_count = spark.table("spark_catalog.bronze.devoluciones_raw").count()
+
     synthetic_marker = "SENSITIVE_MOTIVO_PARSE_MARKER_999"
-    csv_file = tmp_path / "devoluciones.csv"
+    csv_file = tmp_path / "devoluciones_extra_col.csv"
     csv_file.write_text(
         ",".join(DEVOLUCIONES_SOURCE_COLUMNS)
         + "\n"
@@ -122,10 +129,6 @@ def test_malformed_input_preserves_motivo_privacy_across_exception_and_diagnosti
     assert synthetic_marker not in err_msg, "Sensitive motivo leaked in exception string"
     assert "Malformed CSV record detected" in err_msg
 
-    captured = capsys.readouterr()
-    assert synthetic_marker not in captured.err, "Sensitive motivo leaked in stderr"
-    assert synthetic_marker not in captured.out, "Sensitive motivo leaked in stdout"
-
     # 2. Test ingest_bronze route
     batch_dir = tmp_path / "devoluciones" / "batch_id=batch_err"
     batch_dir.mkdir(parents=True)
@@ -138,6 +141,66 @@ def test_malformed_input_preserves_motivo_privacy_across_exception_and_diagnosti
 
     assert synthetic_marker not in str(ing_exc.value)
     assert "malformed records detected" in str(ing_exc.value)
+
+    # 3. Capture all stdout/stderr emitted by Spark/JVM and Python throughout the entire execution
+    captured = capfd.readouterr()
+    assert synthetic_marker not in captured.err, "Sensitive motivo leaked in stderr"
+    assert synthetic_marker not in captured.out, "Sensitive motivo leaked in stdout"
+
+    # 4. Verify absence of publication to Bronze
+    after_count = spark.table("spark_catalog.bronze.devoluciones_raw").count()
+    assert after_count == initial_count
+
+
+def test_missing_header_preserves_motivo_privacy_across_exception_and_diagnostics(
+    spark, tmp_path, capfd
+):
+    spark.sql("CREATE SCHEMA IF NOT EXISTS spark_catalog.bronze")
+    spark.sql(
+        "CREATE TABLE IF NOT EXISTS spark_catalog.bronze.devoluciones_raw "
+        "USING delta AS SELECT 1 WHERE 1=0"
+    )
+    initial_count = spark.table("spark_catalog.bronze.devoluciones_raw").count()
+
+    synthetic_marker = "SENSITIVE_MOTIVO_HEADER_ABSENT_888"
+    csv_file = tmp_path / "devoluciones_no_header.csv"
+    # Two data rows without header
+    csv_file.write_text(
+        f"DEV-001,PED-001,PROD-001,2026-08-20,{synthetic_marker},APROBADA,10.00,PEN,2026-08-20T10:00:00Z\n"
+        f"DEV-002,PED-002,PROD-002,2026-08-20,{synthetic_marker},APROBADA,20.00,PEN,2026-08-20T10:00:00Z\n",
+        encoding="utf-8",
+    )
+
+    # 1. Test read_batch directly on file without header
+    with pytest.raises(IngestionError) as exc_info:
+        read_batch(spark, str(csv_file), "batch_no_hdr", "run_err")
+
+    err_msg = str(exc_info.value)
+    assert synthetic_marker not in err_msg, "Sensitive motivo leaked in exception string"
+    assert "Invalid or missing CSV header" in err_msg
+
+    # 2. Test ingest_bronze route on directory without header
+    batch_dir = tmp_path / "devoluciones" / "batch_id=batch_no_hdr"
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "devoluciones.csv").write_text(
+        csv_file.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    with pytest.raises(IngestionError) as ing_exc:
+        ingest_bronze(spark, "spark_catalog", str(tmp_path), "batch_no_hdr", "run_err")
+
+    ing_msg = str(ing_exc.value)
+    assert synthetic_marker not in ing_msg, "Sensitive motivo leaked in ingest_bronze exception"
+    assert "Invalid or missing CSV header" in ing_msg
+
+    # 3. Capture all stdout/stderr emitted by Spark/JVM and Python throughout the entire execution
+    captured = capfd.readouterr()
+    assert synthetic_marker not in captured.err, "Sensitive motivo leaked in stderr"
+    assert synthetic_marker not in captured.out, "Sensitive motivo leaked in stdout"
+
+    # 4. Verify absence of publication to Bronze
+    after_count = spark.table("spark_catalog.bronze.devoluciones_raw").count()
+    assert after_count == initial_count
 
 
 def test_bronze_strict_batch_selection_and_idempotence_with_real_delta(spark, tmp_path):

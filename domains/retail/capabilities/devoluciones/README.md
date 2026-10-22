@@ -59,7 +59,7 @@ El alcance de esta capability de onboarding comprende la ingestión Bronze cruda
 ## Operación
 
 - Runbook operativo detallado: Consulte el apartado específico en [`docs/operations/retail-runbook.md`](../../../../docs/operations/retail-runbook.md#f-protocolo-operativo-y-de-recuperación-capability-retaildevoluciones-sandbox).
-- Criterio de ejecución operativa: Ventana operativa del laboratorio acotada a **hasta 60 minutos de tiempo transcurrido inicio-fin por run sandbox**, evaluada midiendo la duración total efectiva de ejecución. Esta ventana no proviene de un timeout global a nivel de parent Job (inexistente en la plataforma/spec), sino de un criterio de seguimiento del laboratorio, complementado por los límites a nivel de tarea declarados (`timeout_seconds: 1800` en Bronze y Silver, con 1 reintento tras 60s en Bronze). No constituye un SLA productivo ni cuenta con servicios corporativos de alerta automatizada externos; rige el seguimiento del Job y la bitácora auditable de la sesión.
+- Criterio de ejecución operativa: Ventana operativa del laboratorio acotada a **hasta 60 minutos de tiempo transcurrido inicio-fin por run sandbox**, evaluada midiendo la duración total efectiva de ejecución. Esta ventana no proviene de un timeout global a nivel de parent Job (no configurado en este Job y no expresado por la spec gobernada actual, no como imposibilidad de la plataforma), sino de un criterio de seguimiento del laboratorio, complementado por los límites a nivel de tarea declarados (`timeout_seconds: 1800` en Bronze y Silver, con 1 reintento tras 60s en Bronze). No constituye un SLA productivo ni cuenta con servicios corporativos de alerta automatizada externos; rige el seguimiento del Job y la bitácora auditable de la sesión.
 - Idempotencia lógica gobernada: La garantía de no duplicación y reemplazo exacto se implementa lógicamente mediante predicados selectivos `replaceWhere` (`_ingestion_batch_id` en Bronze y `_source_batch_id` en Silver Curated). No requiere ni afirma particionado físico en disco para satisfacer la idempotencia a nivel de tabla Delta.
 - Spec declarativa: [`specs/jobs.yml`](specs/jobs.yml).
 - Recurso generado: [`resources/jobs.generated.yml`](resources/jobs.generated.yml).
@@ -85,6 +85,6 @@ El alcance de esta capability de onboarding comprende la ingestión Bronze cruda
 
 ## Lifecycle
 
-- Estado actual: `proposed`.
-- Transición a `active`: Requiere la aprobación de la PR por el code owner (`becavas83`), verificación técnica satisfactoria y cierre de gates locales.
+- Estado actual: `active` en sandbox (delimitada exclusivamente al ambiente de pruebas y evaluación en sandbox; sin promoción a ambientes compartidos DEV/CERTI/PROD).
+- Transición y acreditación: Activada en sandbox tras la integración de la PR #34, aprobación del code owner (`becavas83`), verificación remota en sandbox de los lotes 20, 21 y 22, e idempotencia acreditada.
 - Retiro: Cualquier propuesta de deprecación exige registrar la justificación en `docs/operations/deprecation-checklist.md`, verificar ausencia de consumidores y requerir aprobación expresa del data owner.

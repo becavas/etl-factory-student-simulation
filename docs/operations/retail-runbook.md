@@ -295,7 +295,7 @@ El campo `motivo` está clasificado como dato confidencial/sensible de negocio. 
 #### 5. Criterio Operativo del Laboratorio (Ventana de Ejecución)
 - **Criterio de Medición Operativa (Inicio-Fin <= 60 min)**: Se establece como criterio de evaluación del laboratorio una ventana de tiempo transcurrido total de **hasta 60 minutos por run sandbox**, medido entre el inicio y la finalización efectiva del pipeline.
 - **Distinción Técnica de Timeouts**:
-  - A nivel de Job: No existe un parámetro de timeout global forzado por la plataforma para el parent Job (`timeout_seconds` a nivel de job no está configurado ni soportado en la spec gobernada).
+  - A nivel de Job: Este Job no configura un timeout global y la spec gobernada actual no lo expresa (la ausencia corresponde a la configuración de este recurso/spec y no a una limitación intrínseca de la plataforma).
   - A nivel de Tarea: Cada task individual tiene configurado `timeout_seconds: 1800` (Bronze y Silver), y la task Bronze cuenta con 1 reintento con backoff de 60s.
   - La cota de 60 minutos es un criterio operativo y de auditoría humana/experimental, no un timeout de plataforma que corte el parent job de forma consolidada.
 - **Límites Reales**: Este ejercicio no cuenta con un SLA productivo formal de 24/7 ni integración con servicios corporativos de alerta externa (PagerDuty/Slack corporativo). El mecanismo de supervisión disponible es el seguimiento directo vía Databricks CLI y el registro fehaciente en la bitácora única de auditoría.

@@ -1,0 +1,54 @@
+spec_version: 1
+kind: bundle_jobs
+
+metadata:
+  domain: retail
+  capability: devoluciones
+
+package:
+  name: enterprise-fabric
+  wheel_path: ../../../../../dist/*.whl
+
+jobs:
+  - key: devoluciones_pipeline_job
+    name: retail-devoluciones-pipeline
+    layer: bronze-silver
+    max_concurrent_runs: 1
+    parameters:
+      batch_id: "2026-08-20"
+    clusters:
+      - key: devoluciones_job_compute
+        profile: classic_single_user_small
+        tags:
+          layer: bronze-silver
+          policy_profile: baseline
+          target_table: devoluciones_curated
+          workload: e2e
+    tasks:
+      - key: ingest_devoluciones_bronze
+        cluster_key: devoluciones_job_compute
+        timeout_seconds: 1800
+        retry:
+          max_retries: 1
+          min_retry_interval_millis: 60000
+          retry_on_timeout: false
+        wheel:
+          entry_point: devoluciones-bronze
+          named_parameters:
+            catalog: ${var.catalog}
+            source_volume_path: ${var.source_volume_path}
+            batch_id: "{{job.parameters.batch_id}}"
+            run_id: "{{job.run_id}}"
+      - key: publish_devoluciones_silver
+        depends_on:
+          - ingest_devoluciones_bronze
+        cluster_key: devoluciones_job_compute
+        timeout_seconds: 1800
+        retry:
+          max_retries: 0
+        wheel:
+          entry_point: devoluciones-silver
+          named_parameters:
+            catalog: ${var.catalog}
+            batch_id: "{{job.parameters.batch_id}}"
+            quality_run_id: "{{job.run_id}}"

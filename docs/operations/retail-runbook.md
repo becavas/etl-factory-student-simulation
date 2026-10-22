@@ -239,6 +239,77 @@ Para la prueba programada de laboratorio en PROD:
 - **Reconciliación Inmediata de `main`**:
   Tras completar el rollback y validar el servicio en Databricks, el operador debe abrir de inmediato una Pull Request de reconciliación en la rama `main` del repositorio para asegurar que el próximo despliegue no reintroduzca el defecto revertido.
 
+### F. Protocolo Operativo y de Recuperación: Capability retail/devoluciones (Sandbox)
+
+Este protocolo define las operaciones específicas para la capability gobernada `retail/devoluciones` en el ambiente sandbox (`retail_sbx_a001`).
+
+#### 1. Procedimiento de Diagnóstico y Recuperación Reproducible
+- **Ejecución manual o de reproceso**:
+  ```bash
+  cd domains/retail/capabilities/devoluciones
+  set -a
+  source ../../../../.env.local
+  set +a
+  databricks bundle run --target sandbox --params batch_id=<batch_id> devoluciones_pipeline_job
+  ```
+- **Inspección del estado del Job**:
+  Verificar la salida del CLI o en el Workspace UI (`Jobs → retail-devoluciones-pipeline`). Si el run falla, identificar en qué task ocurrió el error (`ingest_devoluciones_bronze` o `publish_devoluciones_silver`).
+
+#### 2. Localización de Evidencia de DQ, Run y Batch sin Exponer `motivo`
+El campo `motivo` está clasificado como dato confidencial/sensible de negocio. Su contenido no debe exponerse en canales de comunicación, tickets de soporte, mensajes de error ni trazas de logging.
+- **Auditoría de Métricas de Calidad**:
+  Consultar `silver.devoluciones_quality_metrics` (tabla puramente agregada sin valores de datos de fila):
+  ```sql
+  SELECT quality_run_id, batch_id, entity, rule_id, action, failed_records, total_records, observed_at_utc
+  FROM retail_sbx_a001.silver.devoluciones_quality_metrics
+  WHERE batch_id = '<batch_id>' AND quality_run_id = '<quality_run_id>'
+  ORDER BY observed_at_utc DESC;
+  ```
+- **Inspección Segura de Cuarentena**:
+  Si se requiere conocer qué reglas fueron violadas en `silver.devoluciones_quarantine`, proyectar únicamente los atributos técnicos:
+  ```sql
+  SELECT _quality_run_id, _source_batch_id, _quality_rule_ids, _record_hash, _quarantined_at_utc
+  FROM retail_sbx_a001.silver.devoluciones_quarantine
+  WHERE _source_batch_id = '<batch_id>' AND _quality_run_id = '<quality_run_id>';
+  ```
+  *Regla Operativa Estricta*: Queda prohibido ejecutar `SELECT _raw_payload:motivo` o compartir volcados crudos de `_raw_payload` en incidentes o bitácoras públicas.
+
+#### 3. Distinción entre Retry Transitorio y FAIL Determinista
+- **Task Bronze (`ingest_devoluciones_bronze`)**:
+  - Cuenta con un reintento acotado automático (`max_retries: 1`, intervalo de 60s, `retry_on_timeout: false`).
+  - Su propósito es mitigar fallos transitorios de red, timeout de compute inicial o concurrencia temporal de metastore.
+  - Si el CSV de origen tiene un fallo estructural/parseo, la lectura falla de forma segura (`IngestionError`) redactando el contenido de las filas para proteger la privacidad de `motivo`.
+- **Task Silver (`publish_devoluciones_silver`)**:
+  - Configurada sin reintentos automáticos (`max_retries: 0`).
+  - Los fallos por reglas de calidad marcadas como `FAIL` (`devolucion_id_required`, `devolucion_updated_at_valid`, `devolucion_producto_required`, `devolucion_estado_valid`, `devolucion_pedido_exists`, `devolucion_tie_conflict`) son de naturaleza determinista.
+  - La tarea evalúa las reglas, persiste métricas y registros de cuarentena correspondientes, y luego levanta `QualityGateError`, abortando la publicación en `silver.devoluciones_curated`. Reintentar automáticamente sin corregir la causa raíz consumiría recursos innecesariamente.
+
+#### 4. Preservación del Batch Inválido y Tratamiento del Sucesor
+- **Inmutabilidad y Preservación Forense**:
+  - Cuando un lote falla el Quality Gate (ejemplo: lote `2026-08-21`), dicho lote permanece inmutable.
+  - No se eliminan ni modifican las filas en Bronze, Cuarentena ni Métricas; el historial queda preservado como evidencia auditable del control de calidad.
+- **Tratamiento del Lote Sucesor**:
+  - El emisor debe generar y publicar un nuevo lote sucesor corregido (ejemplo: lote `2026-08-22`).
+  - El pipeline se ejecuta para el lote sucesor (`batch_id=2026-08-22`), generando un nuevo `quality_run_id` y publicando sus registros en `curated` sin sobrescribir ni alterar el registro histórico del lote fallido.
+
+#### 5. Criterio Operativo del Laboratorio (Ventana de Ejecución)
+- **Criterio de Medición Operativa (Inicio-Fin <= 60 min)**: Se establece como criterio de evaluación del laboratorio una ventana de tiempo transcurrido total de **hasta 60 minutos por run sandbox**, medido entre el inicio y la finalización efectiva del pipeline.
+- **Distinción Técnica de Timeouts**:
+  - A nivel de Job: No existe un parámetro de timeout global forzado por la plataforma para el parent Job (`timeout_seconds` a nivel de job no está configurado ni soportado en la spec gobernada).
+  - A nivel de Tarea: Cada task individual tiene configurado `timeout_seconds: 1800` (Bronze y Silver), y la task Bronze cuenta con 1 reintento con backoff de 60s.
+  - La cota de 60 minutos es un criterio operativo y de auditoría humana/experimental, no un timeout de plataforma que corte el parent job de forma consolidada.
+- **Límites Reales**: Este ejercicio no cuenta con un SLA productivo formal de 24/7 ni integración con servicios corporativos de alerta externa (PagerDuty/Slack corporativo). El mecanismo de supervisión disponible es el seguimiento directo vía Databricks CLI y el registro fehaciente en la bitácora única de auditoría.
+
+#### 6. Responsables y Escalamiento
+- **Technical Owner & Platform Operator**: `becavas` (Data Engineering Retail).
+- **Data Owner**: `becavas` (`bcastillo@techdic.onmicrosoft.com`).
+- **Code Owner / Revisor GitHub**: `becavas83`.
+- **Soporte y Criterios Técnicos**: Asistente técnico Codex.
+
+#### 7. Medición de Tiempos y Trazabilidad Transaccional
+- Cada fase registra timestamps UTC normalizados: `_ingested_at_utc` en Bronze; `_curated_at_utc` en Silver Curated; `_quarantined_at_utc` en Silver Quarantine; `observed_at_utc` en Métricas.
+- La trazabilidad de sustitución selectiva se audita mediante `DESCRIBE HISTORY` en cada tabla Delta involucrada, verificando operaciones `replaceWhere`.
+
 ## 4. Recuperación de Datos (Procedimiento Externo)
 La restauración de tablas Delta, Time Travel, backups físicos o Point-in-Time Recovery es potestad exclusiva de Data Platform y del Custodio de Datos mediante su procedimiento externo. La fábrica de software no altera datos directamente mediante comandos manuales no auditados.
 

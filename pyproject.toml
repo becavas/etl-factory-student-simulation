@@ -21,6 +21,8 @@ productos-silver = "enterprise_fabric.retail.productos.entrypoints:run_silver"
 ventas-dimensions = "enterprise_fabric.retail.ventas.entrypoints:run_dimensions"
 ventas-fact = "enterprise_fabric.retail.ventas.entrypoints:run_fact"
 ventas-daily-kpi = "enterprise_fabric.retail.ventas.entrypoints:run_daily_kpi"
+devoluciones-bronze = "enterprise_fabric.retail.devoluciones.entrypoints:run_bronze"
+devoluciones-silver = "enterprise_fabric.retail.devoluciones.entrypoints:run_silver"
 
 
 
